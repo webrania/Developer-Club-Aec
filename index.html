@@ -1,0 +1,1545 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Al-Ameen Developer Club Dashboard</title>
+
+  <!-- Favicon & Mobile Web Shortcut App manifest tags -->
+  <link rel="icon" type="image/png" href="logo_club.png">
+  <link rel="apple-touch-icon" href="logo_club.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Developer Club">
+
+  <link rel="stylesheet" href="style.css">
+  <!-- Firebase Auth: start fetching these the moment the page loads, in
+       parallel with everything else, instead of only starting once
+       main.js's own import statement is reached. This is what actually
+       makes the first sign-in click feel instant instead of delayed. -->
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+  <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js">
+  <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+  <!-- Drawer overlay backdrop for mobile menu -->
+  <div id="mobile-drawer-overlay" class="drawer-overlay"></div>
+
+  <!-- Interactive canvas background ambient particles -->
+  <canvas id="canvas-ambient-particles"
+    style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -10; pointer-events: none; opacity: 0.55;"></canvas>
+
+  <!-- Mock Scraper Loading Overlay -->
+  <div id="crawler-overlay" class="modal-overlay" style="background-color: rgba(9, 9, 11, 0.95);">
+    <div class="modal-card text-center"
+      style="max-width: 420px; padding: 2.5rem 2rem; border-color: var(--primary-blue-light);">
+      <div
+        style="margin-bottom: 1.5rem; position: relative; width: 80px; height: 80px; margin-left: auto; margin-right: auto;">
+        <div
+          style="box-sizing: border-box; display: block; position: absolute; width: 64px; height: 64px; margin: 8px; border: 6px solid var(--accent-orange); border-radius: 50%; animation: spin 1.2s cubic-bezier(0.5, 0, 0.5, 1) infinite; border-color: var(--accent-orange) transparent transparent transparent;">
+        </div>
+        <div
+          style="box-sizing: border-box; display: block; position: absolute; width: 64px; height: 64px; margin: 8px; border: 6px solid var(--primary-blue); border-radius: 50%; animation: spin 1.2s linear infinite; border-color: transparent transparent var(--primary-blue-light) transparent; transform: rotate(45deg);">
+        </div>
+      </div>
+      <h3 style="margin-bottom: 0.5rem;">Extracting Platform Credentials</h3>
+      <p class="kpi-subtext" id="crawler-status-message"
+        style="color: var(--primary-blue-light); font-weight: 600; font-size: 0.9rem;">
+        [Connecting to profile API directories...]
+      </p>
+      <div
+        style="margin-top: 1rem; width: 100%; height: 6px; background-color: var(--accent-bg); border-radius: 99px; overflow: hidden; position: relative;">
+        <div id="crawler-progress-bar"
+          style="position: absolute; top: 0; left: 0; height: 100%; width: 15%; background: linear-gradient(90deg, var(--primary-blue), var(--accent-orange)); border-radius: 99px; transition: width 0.4s ease;">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header>
+    <div class="header-inner">
+      <div class="branding-group">
+        <!-- Hamburger Menu Toggle Button on Mobile -->
+        <button class="icon-btn" id="btn-mobile-menu" aria-label="Toggle Navigation Menu"
+          style="margin-right: 0.25rem; display: none;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
+        <div class="branding-logos">
+          <!-- Developer Club Logo Only -->
+          <img src="logo_club.png" alt="Developer Club Logo" id="img-club">
+        </div>
+        <div class="brand-text">
+          <h1>Developer Club</h1>
+          <p>Al-Ameen Engineering College • Webrania Association</p>
+        </div>
+      </div>
+      <div class="controls-group">
+        <button class="icon-btn" id="btn-theme-toggle" aria-label="Toggle Theme">
+          <svg id="icon-moon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+          </svg>
+          <svg id="icon-sun" class="d-none" xmlns="http://www.w3.org/2000/svg" width="18" height="18"
+            viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2v2" />
+            <path d="M12 20v2" />
+            <path d="m4.93 4.93 1.41 1.41" />
+            <path d="m17.66 17.66 1.41 1.41" />
+            <path d="M2 12h2" />
+            <path d="M20 12h2" />
+            <path d="m6.34 17.66-1.41 1.41" />
+            <path d="m19.07 4.93-1.41 1.41" />
+          </svg>
+        </button>
+
+
+
+        <button class="action-btn primary-btn" id="btn-login-trigger">Sign In</button>
+        <div id="user-profile-summary" class="d-none"
+          style="display: flex; align-items: center; gap: 0.5rem; text-align: right; cursor: pointer;"
+          onclick="document.getElementById('tab-profile-trigger').click()" title="Go to My Profile">
+          <img id="header-user-avatar" src="logo_club.png" alt="User Avatar"
+            style="width: 26px; height: 26px; border-radius: 50%; object-fit: cover; border: 1.5px solid var(--primary-blue-light); transition: transform 0.2s ease;">
+          <div style="display: flex; flex-direction: column; align-items: flex-end;">
+            <span id="header-user-name" class="student-name" style="font-size: 0.8rem; line-height: 1.2;">Student
+              User</span>
+            <button id="btn-logout" class="tab-btn"
+              style="padding: 0; font-size: 0.7rem; border: none; background: transparent; cursor: pointer; color: var(--text-secondary);"
+              onclick="event.stopPropagation(); window.handleLogout()">Sign Out</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Application Container -->
+  <main class="app-container">
+
+    <!-- Dynamic Navigation Tabs -->
+    <nav class="nav-tabs" id="desktop-tabs">
+      <button class="tab-btn active" id="tab-about-trigger" data-target="view-about">
+        About
+      </button>
+      <button class="tab-btn d-none" id="tab-admin-trigger" data-target="view-admin-dashboard">
+        Admin Dashboard
+      </button>
+      <button class="tab-btn" id="tab-leaderboard-trigger" data-target="view-leaderboard">
+        Club Leaderboard
+      </button>
+      <button class="tab-btn" id="tab-volunteers-trigger" data-target="view-volunteers">
+        Volunteers
+      </button>
+      <button class="tab-btn d-none" id="tab-depts-trigger" data-target="view-departments">
+        Departments
+      </button>
+      <button class="tab-btn" id="tab-profile-trigger" data-target="view-profile">
+        My Profile
+      </button>
+      <button class="tab-btn" id="tab-courses-trigger" data-target="view-courses">
+        Courses
+      </button>
+      <button class="tab-btn" id="tab-notif-trigger" data-target="view-announcements">
+        Announcements
+        <span id="notif-badge-count" class="badge d-none"
+          style="margin-left: 0.25rem; background-color: var(--accent-orange); color: #ffffff; width: 8px; height: 8px; border-radius: 50%; padding: 0; display: inline-block; vertical-align: middle;"></span>
+      </button>
+    </nav>
+
+    <!-- Clean Layout Container -->
+    <div class="dashboard-layout">
+
+      <!-- Primary Tab Views -->
+      <div class="main-content">
+
+        <!-- Tab 1: About (Student Home Landing Page) -->
+        <div id="view-about" class="tab-content active">
+
+          <!-- Pinned Top Event Ad Banner -->
+          <div id="top-ad-banner" class="ad-banner-card d-none animate-fade">
+            <span class="ad-banner-badge">FEATURED CLUB EVENT</span>
+            <h3 class="ad-banner-title" id="ad-banner-title">Featured announcement title</h3>
+            <p class="ad-banner-body" id="ad-banner-body">Description details</p>
+          </div>
+
+          <!-- Converted About Section (Clean block card with branding header) -->
+          <div class="about-card animate-fade">
+
+            <!-- Converted Logos inside About card - Centered list of Webrania, Dev Club (center), Al-Ameen -->
+            <div class="about-logos-header"
+              style="display: flex; justify-content: center; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
+              <img src="logo_webrania.png" alt="Webrania Logo" loading="lazy" class="about-logo-img"
+                style="height: 48px; object-fit: contain;">
+              <div class="about-logo-divider" style="width: 1px; height: 35px; background-color: var(--border-color);">
+              </div>
+              <img src="logo_club.png" alt="Developer Club Logo" loading="lazy" class="about-logo-img"
+                style="height: 64px; object-fit: contain;">
+              <div class="about-logo-divider" style="width: 1px; height: 35px; background-color: var(--border-color);">
+              </div>
+              <img src="logo_college.png" alt="Al-Ameen College Logo" loading="lazy" class="about-logo-img"
+                style="height: 48px; object-fit: contain;">
+            </div>
+
+            <h3 class="about-title" style="margin-top: 1.5rem; border-left: none; padding-left: 0; text-align: center;">
+              Developer Club</h3>
+            <h4
+              style="text-align: center; color: var(--text-secondary); font-size: 0.95rem; margin-top: -0.5rem; margin-bottom: 2rem; font-weight: 500;">
+              An Initiative of the CSE Webrania Association
+            </h4>
+
+            <p class="about-intro"
+              style="text-align: center; max-width: 850px; margin-left: auto; margin-right: auto; margin-bottom: 1.5rem; line-height: 1.7;">
+              Developer Club bridges the gap between academic theory and software industry readiness. Guided by our core
+              motto <span class="about-motto">“Learn • Build • Collaborate • Grow,”</span> we create a coding
+              environment where students from all departments (CSE,AI&DS, IT, ECE) can learn from experienced mentors
+              and build real-world software applications.
+            </p>
+
+            <p class="about-intro"
+              style="text-align: center; max-width: 850px; margin-left: auto; margin-right: auto; margin-bottom: 2.5rem; line-height: 1.7; font-size: 0.88rem; color: var(--text-secondary);">
+              Our programs are designed to assist students in tracking their progress across coding platforms like
+              LeetCode and GitHub repositories, preparing them for premium placement opportunities. Committee volunteers
+              coordinate hands-on sessions covering Web/App Development, DevOps, Cloud Computing, and Artificial Science
+              applications.
+            </p>
+
+            <div class="about-grid">
+              <div class="about-block">
+                <h4 class="about-block-title">🚀 Free Upskilling</h4>
+                <p class="about-block-text">Access verified certification courses across platforms like Udemy, IBM,
+                  Cisco, and Microsoft at zero cost.</p>
+              </div>
+              <div class="about-block">
+                <h4 class="about-block-title">💼 Career & Placement Prep</h4>
+                <p class="about-block-text">Dedicated tracking for LeetCode problem-solving, GitHub portfolios, and
+                  resume optimization.</p>
+              </div>
+              <div class="about-block">
+                <h4 class="about-block-title">🛠️ Hands-On Exposure</h4>
+                <p class="about-block-text">Practical experience across core domains—from Web/App Development and Data
+                  Science to Cybersecurity, Cloud, and DevOps.</p>
+              </div>
+              <div class="about-block">
+                <h4 class="about-block-title">🏆 Events & Competitions</h4>
+                <p class="about-block-text">Technical seminars, hackathons, and coding challenges to turn ideas into
+                  real-world projects.</p>
+              </div>
+
+              <div class="about-block" style="border-left: 3px solid var(--accent-orange);">
+                <h4 class="about-block-title" style="color: var(--accent-orange);">📈 Club Milestones</h4>
+                <p class="about-block-text" style="font-weight: 600; font-size: 0.82rem;">100+ active event participants
+                  and 150+ professional certifications completed across departments.</p>
+              </div>
+
+              <!-- Developed By Credit Section -->
+              <div class="about-block"
+                style="border-left: 3px solid var(--primary-blue); display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 1.25rem;">
+                <h4
+                  style="font-size: 0.72rem; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 0.25rem; font-weight: 700; letter-spacing: 0.5px;">
+                  Developed By</h4>
+                <a href="https://irfan1136.github.io/portfolio11/" target="_blank" rel="noopener noreferrer"
+                  class="dev-credit-link"
+                  style="font-weight: 700; font-size: 0.95rem; color: var(--primary-blue); margin-bottom: 0.12rem; text-decoration: none;">Mr.Mohamed
+                  Irfan</a>
+                <p class="kpi-subtext"
+                  style="font-size: 0.75rem; font-weight: 600; color: var(--text-secondary); margin: 0;">Ex-Secretary
+                  Webrania Association & Ex-President Developer Club</p>
+              </div>
+
+              <!-- Visit Volunteers Button inside About page -->
+              <div class="about-footer-action"
+                style="grid-column: 1 / -1; margin-top: 1.5rem; border-top: 1px solid var(--border-color); padding-top: 1.5rem; text-align: center;">
+                <p class="kpi-subtext" style="margin-bottom: 0.75rem;">Want to contact the committee organizing core
+                  team?</p>
+                <button id="btn-goto-volunteers" class="action-btn primary-btn"
+                  style="padding: 0.625rem 1.5rem; font-size: 0.85rem; border-radius: 99px; display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                  <span>Visit Volunteers Details</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                    <polyline points="12 5 19 12 12 19" />
+                  </svg>
+                </button>
+              </div>
+
+
+
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Admin Dashboard -->
+        <div id="view-admin-dashboard" class="tab-content">
+
+          <!-- Admin KPIs Section -->
+          <section id="admin-kpi-grid-section" class="animate-fade">
+            <div class="kpi-grid">
+              <div class="kpi-card">
+                <span class="kpi-title">Registered Members</span>
+                <span class="kpi-value number-font" id="kpi-total-members">0</span>
+                <span class="kpi-subtext">Students enrolled in database</span>
+              </div>
+              <div class="kpi-card">
+                <span class="kpi-title">Active Members</span>
+                <span class="kpi-value number-font" id="kpi-active-members">0</span>
+                <span class="kpi-subtext">Active contribution streaks</span>
+              </div>
+              <div class="kpi-card">
+                <span class="kpi-title">CV Review Status</span>
+                <span class="kpi-value number-font" id="kpi-approved-cvs">0</span>
+                <span class="kpi-subtext">Approved portfolios</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- Certifications Verification Section -->
+          <section id="admin-certifications-section" class="animate-fade">
+            <div class="section-card" style="padding: 1.25rem; margin-bottom: 1.5rem;">
+              <h3
+                style="font-size: 1.1rem; color: var(--primary-blue); border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; margin-bottom: 1rem;">
+                Student Certifications</h3>
+              <div id="admin-certifications-list" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                <!-- populated programmatically -->
+              </div>
+            </div>
+          </section>
+
+          <!-- Admin Graphs with Year Filter -->
+          <section id="admin-charts-section" class="animate-fade">
+            <div class="section-card" style="padding: 1.25rem; margin-bottom: 1.5rem;">
+              <div
+                style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem; margin-bottom: 1.25rem;">
+                <div>
+                  <h3 style="font-size: 1.1rem; color: var(--primary-blue);">Analytics & Ratios Overview</h3>
+                  <p class="kpi-subtext">Filter stats ratios reactively by year</p>
+                </div>
+                <!-- Year Selector for Charts -->
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                  <div class="form-group" style="margin-bottom: 0; min-width: 180px;">
+                    <select id="chart-filter-year" class="form-control"
+                      style="padding: 0.375rem 0.5rem; font-size: 0.8rem;">
+                      <option value="ALL">All Academic Years</option>
+                      <option value="1st Year">1st Year Only</option>
+                      <option value="2nd Year">2nd Year Only</option>
+                      <option value="3rd Year">3rd Year Only</option>
+                      <option value="4th Year">4th Year Only</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom: 0; min-width: 160px;">
+                    <select id="chart-filter-time-window" class="form-control"
+                      style="padding: 0.375rem 0.5rem; font-size: 0.8rem;">
+                      <option value="LAST30" selected>Last 30 Days</option>
+                      <option value="CALENDAR_MONTH">This Month</option>
+                      <option value="OVERALL">Overall (GitHub: this year)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Center aligned charts -->
+              <div class="charts-container"
+                style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2rem;">
+                <div class="chart-card" style="width: 100%; max-width: 480px;">
+                  <h4
+                    style="font-size: 0.85rem; margin-bottom: 0.75rem; color: var(--text-secondary); text-transform: uppercase; text-align: center;">
+                    Top Performers by Department</h4>
+                  <div class="chart-wrapper" style="height: 250px; position: relative;">
+                    <canvas id="chart-active-ratio"></canvas>
+                  </div>
+                </div>
+                <div class="chart-card" style="width: 100%; max-width: 480px;">
+                  <h4
+                    style="font-size: 0.85rem; margin-bottom: 0.75rem; color: var(--text-secondary); text-transform: uppercase; text-align: center;">
+                    Students Count Per Department</h4>
+                  <div class="chart-wrapper" style="height: 250px; position: relative;">
+                    <canvas id="chart-dept-points"></canvas>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Member Registry Directory -->
+          <div class="orange-shade-divider"></div>
+          <section id="directory-table-section" class="section-card animate-fade">
+            <div class="section-header"
+              style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+              <div>
+                <h2>Club Member Database Registry</h2>
+                <span class="kpi-subtext" id="directory-count">Showing 0 members</span>
+              </div>
+              <div style="display: flex; gap: 0.5rem;">
+                <button id="btn-export-excel" class="action-btn"
+                  style="background-color: #10b981; color: white; border: none; font-size: 0.78rem; padding: 0.4rem 0.85rem; border-radius: 6px; display: inline-flex; align-items: center; gap: 0.35rem;"
+                  title="Export Database to Excel Sheet (CSV)">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Export Excel Sheet
+                </button>
+                <button id="btn-force-resync-all" class="action-btn"
+                  style="background-color: #f59e0b; color: white; border: none; font-size: 0.78rem; padding: 0.4rem 0.85rem; border-radius: 6px; display: inline-flex; align-items: center; gap: 0.35rem;"
+                  title="Force a fresh GitHub/LeetCode fetch for every student right now">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="23 4 23 10 17 10" />
+                    <polyline points="1 20 1 14 7 14" />
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                  </svg>
+                  Re-sync All Now
+                </button>
+              </div>
+            </div>
+
+            <div class="filter-panel"
+              style="border: none; border-bottom: 1px solid var(--border-color); border-radius: 0; box-shadow: none; margin-bottom: 0;">
+              <div class="filter-group">
+                <label for="filter-search">Search Member</label>
+                <input type="text" id="filter-search" class="filter-control"
+                  placeholder="Search by name or roll number...">
+              </div>
+              <div class="filter-group">
+                <label for="filter-dept">Department</label>
+                <select id="filter-dept" class="filter-control">
+                  <option value="ALL">All Departments</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label for="filter-year">Year</label>
+                <select id="filter-year" class="filter-control">
+                  <option value="ALL">All Years</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label for="filter-status">Activity Status</label>
+                <select id="filter-status" class="filter-control">
+                  <option value="ALL">All Statuses</option>
+                  <option value="ACTIVE">Active Members Only</option>
+                  <option value="INACTIVE">Inactive Members Only</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label for="filter-time-window">Points Window</label>
+                <select id="filter-time-window" class="filter-control">
+                  <option value="LAST30" selected>Last 30 Days</option>
+                  <option value="CALENDAR_MONTH">This Month</option>
+                  <option value="OVERALL">Overall (GitHub: this year)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Responsive Stackable Registry Layout for Mobile/Small Screen viewports -->
+            <div class="table-responsive">
+              <table id="registry-data-table">
+                <thead>
+                  <tr>
+                    <th>S.No.</th>
+                    <th>Student Info</th>
+                    <th>Volunteer</th>
+                    <th>Dept & Year</th>
+                    <th>Activity</th>
+                    <th>GitHub Sessions</th>
+                    <th>LeetCode Points</th>
+                    <th>Profiles Access</th>
+                    <th>CV Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="directory-table-body">
+                  <!-- populated programmatically -->
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <!-- Tab 3: Club Leaderboard -->
+        <div id="view-leaderboard" class="tab-content">
+
+          <!-- Shared Leaderboard Filter Panel for Overall, Department-wise, and Year-wise -->
+          <div class="section-card animate-fade" style="padding: 1rem; margin-bottom: 1.5rem;">
+            <div
+              style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+              <div>
+                <h4 style="color: var(--primary-blue); font-size: 0.9rem; margin-bottom: 0.25rem;">Leaderboard Filters
+                </h4>
+                <p class="kpi-subtext" style="font-size: 0.7rem; margin: 0;">Perform custom ranking drills by category
+                </p>
+              </div>
+              <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+                <div class="form-group" style="margin-bottom: 0; min-width: 150px;">
+                  <select id="leaderboard-filter-time" class="form-control"
+                    style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">
+                    <option value="LAST30" selected>Last 30 Days</option>
+                    <option value="CALENDAR_MONTH">This Month</option>
+                    <option value="OVERALL">Overall (GitHub: this year)</option>
+                  </select>
+                </div>
+                <div class="form-group" style="margin-bottom: 0; min-width: 150px;">
+                  <select id="leaderboard-filter-dept" class="form-control"
+                    style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">
+                    <option value="ALL">Overall Departments</option>
+                  </select>
+                </div>
+                <div class="form-group" style="margin-bottom: 0; min-width: 150px;">
+                  <select id="leaderboard-filter-year" class="form-control"
+                    style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">
+                    <option value="ALL">Overall Years</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-card animate-fade"
+            style="padding: 1.25rem; margin-bottom: 1.5rem; border-top: 4px solid var(--accent-orange);">
+            <h3 class="text-center" style="margin-bottom: 0.5rem;">Developer Club Top Performers</h3>
+            <p class="kpi-subtext text-center" style="margin-bottom: 1.5rem;">The top 3 podium spot holders based on
+              active Coding scores.</p>
+
+            <div class="podium-section">
+              <div class="podium-spot second">
+                <span class="podium-badge">🥈</span>
+                <span class="tooltip-wrapper">
+                  <span class="podium-name" id="podium-2-name">--</span>
+                  <span class="tooltip-text podium-hover-card" id="podium-2-hover"></span>
+                </span>
+                <span class="podium-score number-font" id="podium-2-score">0 pts</span>
+                <span class="kpi-subtext" id="podium-2-dept">--</span>
+              </div>
+              <div class="podium-spot first">
+                <span class="podium-badge">🥇</span>
+                <span class="tooltip-wrapper">
+                  <span class="podium-name" id="podium-1-name">--</span>
+                  <span class="tooltip-text podium-hover-card" id="podium-1-hover"></span>
+                </span>
+                <span class="podium-score number-font" id="podium-1-score">0 pts</span>
+                <span class="kpi-subtext" id="podium-1-dept">--</span>
+              </div>
+              <div class="podium-spot third">
+                <span class="podium-badge">🥉</span>
+                <span class="tooltip-wrapper">
+                  <span class="podium-name" id="podium-3-name">--</span>
+                  <span class="tooltip-text podium-hover-card" id="podium-3-hover"></span>
+                </span>
+                <span class="podium-score number-font" id="podium-3-score">0 pts</span>
+                <span class="kpi-subtext" id="podium-3-dept">--</span>
+              </div>
+            </div>
+
+            <div class="personal-rank-banner" id="leaderboard-personal-banner">
+              <div>
+                <h4 style="color: var(--primary-blue);">Your Placement Rank</h4>
+                <p class="kpi-subtext" id="personal-rank-sub">Sign in to check your relative leaderboard points rank.
+                </p>
+              </div>
+              <div class="kpi-value number-font" id="personal-rank-value"
+                style="font-size: 2rem; color: var(--primary-blue);">--</div>
+            </div>
+          </div>
+
+          <div id="leaderboard-admin-full" class="section-card animate-fade">
+            <div class="section-header">
+              <div>
+                <h2>Competitive Coding Leaderboard (Full View)</h2>
+                <p class="kpi-subtext" style="margin-top: 0.25rem;">Authorized view: GitHub contributions (1x) +
+                  LeetCode solved (10x).</p>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width: 70px; text-align: center;">Rank</th>
+                    <th style="text-align: center;">Student Name</th>
+                    <th style="text-align: center;">Dept & Year</th>
+                    <th style="text-align: center;">GitHub Sessions</th>
+                    <th style="text-align: center;">LeetCode Solved</th>
+                    <th style="text-align: center; width: 140px;">Total Points</th>
+                  </tr>
+                </thead>
+                <tbody id="leaderboard-table-body">
+                  <!-- programmatically populated -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Interactive F.A.Q. / Points System Documentation -->
+          <div style="margin-top: 3rem; border-top: 1px solid var(--border-color); padding-top: 2rem;">
+            <h3 style="color: var(--accent-orange); font-size: 1.1rem; text-align: center; margin-bottom: 1.5rem;">
+              Points Extraction & Ranking Rules</h3>
+
+            <div class="table-responsive"
+              style="max-width: 800px; margin: 0 auto; border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden;">
+              <table
+                style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem; background: rgba(30, 41, 59, 0.2);">
+                <thead>
+                  <tr style="background: rgba(30, 41, 59, 0.6); border-bottom: 1.5px solid var(--border-color);">
+                    <th style="padding: 0.75rem 1rem; color: var(--primary-blue-light); font-weight: 700;">Metrics /
+                      Operations</th>
+                    <th style="padding: 0.75rem 1rem; color: var(--primary-blue-light); font-weight: 700;">Extraction
+                      Rule & Auto-crawler Mode</th>
+                    <th style="padding: 0.75rem 1rem; color: var(--primary-blue-light); font-weight: 700;">Points Weight
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style="border-bottom: 1px solid var(--border-color);">
+                    <td style="padding: 0.75rem 1rem; font-weight: 600; color: var(--text-primary);">GitHub
+                      Contributions</td>
+                    <td style="padding: 0.75rem 1rem; color: var(--text-secondary);">Fetched from the GitHub user
+                      profile statistics and public events API.</td>
+                    <td style="padding: 0.75rem 1rem; color: var(--accent-orange); font-weight: 700;">1 point per
+                      contribution</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid var(--border-color);">
+                    <td style="padding: 0.75rem 1rem; font-weight: 600; color: var(--text-primary);">LeetCode Solved
+                      Problems</td>
+                    <td style="padding: 0.75rem 1rem; color: var(--text-secondary);">Extracted from the LeetCode profile
+                      solved problems count in real-time.</td>
+                    <td style="padding: 0.75rem 1rem; color: var(--accent-orange); font-weight: 700;">10 points per
+                      solved problem</td>
+                  </tr>
+                  <tr style="border-bottom: 1px solid var(--border-color);">
+                    <td style="padding: 0.75rem 1rem; font-weight: 600; color: var(--text-primary);">GitHub Active
+                      Indicator</td>
+                    <td style="padding: 0.75rem 1rem; color: var(--text-secondary);">Pushes within the last 10 days show
+                      a green active badge; >10 days show a red inactive label.</td>
+                    <td style="padding: 0.75rem 1rem; color: var(--text-secondary);">Activity validation threshold</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 4: Volunteers Page -->
+        <div id="view-volunteers" class="tab-content">
+          <div class="details-grid animate-fade">
+            <div class="detail-card" style="grid-column: 1 / -1;">
+              <h3 style="margin-bottom: 0.5rem; color: var(--primary-blue); text-align: center;">Developer Club
+                Volunteers Committee</h3>
+              <p class="kpi-subtext" style="margin-bottom: 2rem; text-align: center;">The dedicated committee team
+                organizing developer bootcamps, upskilling runs, and coding contests.</p>
+
+              <!-- Volunteers rendered inside a clean Table layout -->
+              <div class="table-responsive">
+                <table style="width: 100%;">
+                  <thead>
+                    <tr>
+                      <th>Volunteer Name</th>
+                      <th>Committee Role</th>
+                      <th>Dept & Year</th>
+                      <th style="text-align: center;">Contact Controls</th>
+                      <th id="vol-action-header" class="d-none" style="text-align: center;">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="volunteers-table-body">
+                    <!-- dynamically populated rows centered and styled -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+
+          </div>
+        </div>
+
+        <!-- Tab 5: Separate Departments Page (Admin Only) -->
+        <div id="view-departments" class="tab-content">
+          <div class="details-grid animate-fade">
+            <div class="detail-card">
+              <h3 style="margin-bottom: 1.25rem; color: var(--primary-blue);">Academic Departments Directory</h3>
+              <p class="kpi-subtext" style="margin-bottom: 1rem;">Registered departments participating in Developer Club
+                competitive coding streams.</p>
+              <div id="sidebar-dept-list" style="display: flex; flex-direction: column; gap: 0.5rem;">
+                <!-- populated programmatically -->
+              </div>
+            </div>
+
+            <!-- Add Department (Admin Only form card) -->
+            <div id="admin-dept-crud-controls" class="detail-card d-none">
+              <h3 style="margin-bottom: 1.25rem; color: var(--accent-orange);">Register New Academic Category</h3>
+              <form id="dept-add-form">
+                <div class="form-group">
+                  <label for="dept-add-name">Department Short Code</label>
+                  <input type="text" id="dept-add-name" class="form-control" placeholder="e.g. CSE, IT, AIDS" required>
+                </div>
+                <button type="submit" class="action-btn primary-btn w-full"
+                  style="padding: 0.625rem; margin-top: 0.5rem;">Add Department</button>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 6: My Profile & CV Upload -->
+        <div id="view-profile" class="tab-content">
+          <div id="profile-unauth-container" class="text-center animate-fade"
+            style="padding: 4rem 1.5rem; background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 0.75rem;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+              style="color: var(--text-secondary); margin-bottom: 1rem;">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <h3>Sign In Required</h3>
+            <p class="kpi-subtext" style="margin-bottom: 1.5rem;">Sign in or create your student profile to link
+              accounts and submit CVs.</p>
+            <button class="action-btn primary-btn" id="btn-profile-signin">Sign In Now</button>
+          </div>
+
+          <div id="profile-auth-container" class="d-none details-grid animate-fade">
+            <div class="detail-card">
+              <h3 style="margin-bottom: 1.25rem;">Student Coding Profiles</h3>
+              <form id="profile-handles-form">
+                <div
+                  style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; background-color: var(--accent-bg); padding: 0.75rem; border-radius: 8px; border: 1px dashed var(--border-color);">
+                  <div style="position: relative; width: 64px; height: 64px; flex-shrink: 0;">
+                    <img id="profile-photo-img" src="logo_club.png" alt="Profile Photo"
+                      style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%; border: 2px solid var(--primary-blue-light);">
+                    <label for="profile-photo-input"
+                      style="position: absolute; bottom: 0; right: 0; background: var(--accent-orange); color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; border: 1.5px solid var(--card-bg);"
+                      title="Upload Profile Picture">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 5v14M5 12h14" />
+                      </svg>
+                    </label>
+                    <input type="file" id="profile-photo-input" accept="image/*" style="display: none;">
+                  </div>
+                  <div>
+                    <h4 style="margin: 0; font-size: 0.88rem; font-weight: 700; color: var(--text-primary);">Profile
+                      Picture</h4>
+                    <p class="kpi-subtext" style="margin: 0.15rem 0 0 0; font-size: 0.7rem; line-height: 1.35;">Upload
+                      an avatar to personalize your club dashboard profile.</p>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Student Name</label>
+                  <input type="text" id="profile-student-name" class="form-control" disabled>
+                </div>
+                <div class="form-group">
+                  <label>Register / Roll Number</label>
+                  <input type="text" id="profile-student-roll" class="form-control" disabled>
+                </div>
+                <div class="form-group" id="profile-github-group">
+                  <label>GitHub Profile Link</label>
+                  <input type="url" id="profile-github" class="form-control" placeholder="https://github.com/username">
+                </div>
+                <div class="form-group" id="profile-phone-group">
+                  <label>Mobile Number</label>
+                  <input type="text" id="profile-phone" class="form-control" placeholder="+91 98765 43210">
+                </div>
+                <div class="form-group" id="profile-whatsapp-group">
+                  <label>WhatsApp Number</label>
+                  <input type="text" id="profile-whatsapp" class="form-control" placeholder="9876543210">
+                </div>
+                <div class="form-group" id="profile-leetcode-group">
+                  <label>LeetCode Profile Link</label>
+                  <input type="url" id="profile-leetcode" class="form-control"
+                    placeholder="https://leetcode.com/username">
+                </div>
+                <div class="form-group" id="profile-linkedin-group">
+                  <label>LinkedIn Profile Link</label>
+                  <input type="url" id="profile-linkedin" class="form-control"
+                    placeholder="https://linkedin.com/in/username">
+                </div>
+                <div class="form-group" id="profile-about-group">
+                  <label>About / Bio</label>
+                  <textarea id="profile-about" class="form-control" placeholder="Write a brief introduction..."
+                    style="min-height: 70px;"></textarea>
+                </div>
+                <button type="submit" id="profile-update-btn" class="action-btn primary-btn w-full"
+                  style="margin-top: 1rem;">Update Profiles & Re-Extract Data</button>
+              </form>
+            </div>
+
+            <div class="detail-card" id="profile-cv-card">
+              <h3 style="margin-bottom: 1.25rem;">Placement CV Review</h3>
+              <div style="margin-bottom: 1.5rem;">
+                <div class="detail-row">
+                  <span class="detail-label">Status:</span>
+                  <span class="detail-val" id="profile-cv-status-badge">
+                    <span class="badge badge-inactive">No CV Uploaded</span>
+                  </span>
+                </div>
+                <div class="detail-row"
+                  style="flex-direction: column; gap: 0.25rem; align-items: flex-start; border-bottom: none;">
+                  <span class="detail-label">Placement Evaluator Remarks:</span>
+                  <p id="profile-cv-feedback"
+                    style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 0.5rem; background-color: var(--accent-bg); padding: 0.75rem; border-radius: 0.375rem; width: 100%; border: 1px solid var(--border-color); min-height: 60px;">
+                    Upload a CV to start placement evaluations.
+                  </p>
+                </div>
+              </div>
+
+              <div class="dropzone" id="cv-dropzone">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                <span class="dropzone-title">Upload your PDF CV</span>
+                <span class="dropzone-sub">Drag & Drop or click to browse</span>
+                <input type="file" id="cv-file-input" accept="application/pdf" style="display: none;">
+              </div>
+              <div id="cv-upload-indicator" class="d-none text-center" style="margin-top: 1rem;">
+                <p class="kpi-subtext" style="color: var(--primary-blue-light); font-weight: 600;">Saving CV file...</p>
+              </div>
+            </div>
+
+            <!-- Certifications Card -->
+            <div class="detail-card" id="profile-certifications-card">
+              <h3 style="margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+                <span>My Certifications</span>
+                <button type="button" id="btn-add-certification" class="action-btn primary-btn"
+                  style="padding: 0.35rem 0.75rem; font-size: 0.75rem;">+ Add Certification</button>
+              </h3>
+              <p class="kpi-subtext" style="margin-bottom: 1rem;">Submitted certifications are reviewed by the Admin.
+              </p>
+              <div id="profile-certifications-list" style="display: flex; flex-direction: column; gap: 0.6rem;">
+                <!-- populated programmatically -->
+              </div>
+            </div>
+
+            <!-- Followers Card -->
+            <div class="detail-card" id="profile-connections-card">
+              <h3 style="margin-bottom: 1.25rem;">Developer Club Connections</h3>
+              <div id="profile-following-section">
+                <p class="kpi-subtext" style="margin-bottom: 0.75rem;">Members you are currently following:</p>
+                <div id="profile-following-list"
+                  style="display: flex; flex-direction: column; gap: 0.5rem; max-height: 140px; overflow-y: auto;">
+                  <!-- dynamically loaded in main.js -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab: Courses Page -->
+        <div id="view-courses" class="tab-content">
+          <!-- Admin Controls Section -->
+          <div id="admin-courses-panel" class="d-none animate-fade"
+            style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;">
+            <div class="detail-card" style="padding: 1.25rem; margin-bottom: 0;">
+              <h3 style="margin-bottom: 1rem;" id="course-form-title">Add Course</h3>
+              <form id="course-form">
+                <input type="hidden" id="course-id" value="">
+                <div class="form-group">
+                  <label for="course-url">Course URL</label>
+                  <div style="display: flex; gap: 0.5rem;">
+                    <input type="url" id="course-url" class="form-control"
+                      placeholder="https://www.coursera.org/learn/..." required style="flex: 1;">
+                    <button type="button" id="btn-fetch-course-info" class="action-btn"
+                      style="white-space: nowrap; padding: 0.5rem 0.75rem; font-size: 0.78rem;">Fetch Info</button>
+                  </div>
+                  <span class="field-error" id="err-course-url"></span>
+                </div>
+                <div class="form-group">
+                  <label for="course-title">Course Title</label>
+                  <input type="text" id="course-title" class="form-control"
+                    placeholder="e.g. Google IT Support Professional Certificate" required>
+                </div>
+                <div class="form-group">
+                  <label for="course-thumbnail">Thumbnail URL (auto-filled, or paste your own)</label>
+                  <input type="text" id="course-thumbnail" class="form-control" placeholder="https://...jpg">
+                </div>
+                <div class="form-group">
+                  <label for="course-thumbnail-upload">Or upload a thumbnail manually (used if auto-fetch fails)</label>
+                  <input type="file" id="course-thumbnail-upload" class="form-control" accept="image/*"
+                    style="font-size: 0.78rem;">
+                </div>
+                <div class="form-group">
+                  <label for="course-platform">Platform</label>
+                  <select id="course-platform" class="form-control" required>
+                    <option value="Coursera">Coursera</option>
+                    <option value="IBM">IBM SkillsBuild</option>
+                    <option value="Microsoft">Microsoft Learn</option>
+                    <option value="Cisco">Cisco Networking Academy</option>
+                    <option value="Other">Others</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="course-category">Category</label>
+                  <input type="text" id="course-category" class="form-control"
+                    placeholder="e.g. Cloud, Networking, Data Science" required>
+                </div>
+                <div class="form-group">
+                  <label for="course-coupon">Coupon Code (optional)</label>
+                  <input type="text" id="course-coupon" class="form-control" placeholder="e.g. LEARN30OFF"
+                    style="text-transform: uppercase;">
+                </div>
+                <div style="display: flex; gap: 0.5rem; margin-top: 1rem; justify-content: flex-end;">
+                  <button type="button" id="btn-cancel-edit-course" class="action-btn d-none"
+                    style="min-width: 120px; font-size: 0.8rem; padding: 0.5rem 1rem;">Cancel Edit</button>
+                  <button type="submit" id="btn-submit-course" class="action-btn primary-btn"
+                    style="min-width: 150px; font-size: 0.8rem; padding: 0.5rem 1.25rem;">Save Course</button>
+                </div>
+              </form>
+            </div>
+
+            <div class="detail-card" style="padding: 1.25rem; margin-bottom: 0;">
+              <h3 style="margin-bottom: 1rem;">Manage Courses</h3>
+              <div id="admin-courses-manage-list" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                <!-- populated programmatically -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Public Browse Section -->
+          <div class="section-card animate-fade" style="padding: 1.25rem; background-color: var(--card-bg);">
+            <h3
+              style="color: var(--primary-blue); font-size: 1.05rem; margin-bottom: 1rem; border-bottom: 2px solid var(--border-color); padding-bottom: 0.5rem;">
+              Browse Courses</h3>
+            <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.25rem;">
+              <select id="course-filter-platform" class="form-control" style="max-width: 220px;">
+                <option value="">All Platforms</option>
+                <option value="Coursera">Coursera</option>
+                <option value="IBM">IBM SkillsBuild</option>
+                <option value="Microsoft">Microsoft Learn</option>
+                <option value="Cisco">Cisco Networking Academy</option>
+                <option value="Other">Others</option>
+              </select>
+              <select id="course-filter-category" class="form-control" style="max-width: 220px;">
+                <option value="">All Categories</option>
+              </select>
+            </div>
+            <div id="courses-browse-grid"
+              style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem;">
+              <!-- populated programmatically -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 7: Announcements Page (Alerts) -->
+        <div id="view-announcements" class="tab-content">
+          <!-- Admin Controls Section (Visible only to admin in edit mode) -->
+          <div id="admin-broadcast-panel" class="d-none animate-fade"
+            style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem;">
+            <!-- Broadcast Notice form card -->
+            <div class="detail-card" style="padding: 1.25rem; margin-bottom: 0;">
+              <h3 style="margin-bottom: 1rem;" id="broadcast-form-title">Broadcast Announcement</h3>
+              <form id="announcement-broadcast-form">
+                <input type="hidden" id="broadcast-id" value="">
+                <div class="form-group">
+                  <label for="broadcast-title">Announcement Title</label>
+                  <input type="text" id="broadcast-title" class="form-control"
+                    placeholder="e.g. Contest schedule updates" required>
+                </div>
+
+                <div class="form-group">
+                  <label for="broadcast-type">Priority Level</label>
+                  <select id="broadcast-type" class="form-control">
+                    <option value="info">Info (Blue alert)</option>
+                    <option value="warning">Warning (Orange alert)</option>
+                    <option value="success">Success (Green alert)</option>
+                  </select>
+                </div>
+
+                <div class="form-group" style="position: relative;">
+                  <label for="broadcast-content">Description details</label>
+                  <textarea id="broadcast-content" class="form-control"
+                    placeholder="Provide link directories or instructions..." required
+                    style="min-height: 80px; padding-right: 40px;"></textarea>
+                  <button type="button" id="btn-broadcast-attachment-trigger"
+                    style="position: absolute; right: 8px; bottom: 8px; border: none; background: transparent; cursor: pointer; color: var(--text-secondary); opacity: 0.7; display: flex; align-items: center; justify-content: center; padding: 4px;"
+                    title="Attach Media (Image/Video)">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path
+                        d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div class="form-group d-none">
+                  <label for="broadcast-attachment">Upload Media Attachment (Image/Video - Optional)</label>
+                  <input type="file" id="broadcast-attachment" class="form-control" accept="image/*,video/*"
+                    style="font-size: 0.78rem;">
+                </div>
+
+                <div class="form-group"
+                  style="flex-direction: row; align-items: center; gap: 0.5rem; margin-top: 0.25rem;">
+                  <input type="checkbox" id="broadcast-pinned-ad" style="width: 16px; height: 16px; cursor: pointer;">
+                  <label for="broadcast-pinned-ad"
+                    style="cursor: pointer; text-transform: none; font-size: 0.8rem; font-weight: 500; margin-bottom: 0;">Pin
+                    as Active Featured Event Banner / Ad</label>
+                </div>
+
+                <div class="form-group"
+                  style="flex-direction: row; align-items: center; gap: 0.5rem; margin-top: 0.25rem;">
+                  <input type="checkbox" id="broadcast-has-link" style="width: 16px; height: 16px; cursor: pointer;">
+                  <label for="broadcast-has-link"
+                    style="cursor: pointer; text-transform: none; font-size: 0.8rem; font-weight: 500; margin-bottom: 0;">Button
+                    contains link</label>
+                </div>
+
+                <div id="broadcast-link-fields" class="d-none">
+                  <div class="form-group">
+                    <label for="broadcast-link-label">Button Name</label>
+                    <input type="text" id="broadcast-link-label" class="form-control" placeholder="e.g. Certificate">
+                  </div>
+                  <div class="form-group">
+                    <label for="broadcast-link-url">Link</label>
+                    <input type="text" id="broadcast-link-url" class="form-control"
+                      placeholder="https://example.com/certificate">
+                    <span class="field-error" id="err-broadcast-link-url"></span>
+                  </div>
+                </div>
+
+                <div style="display: flex; gap: 0.5rem; margin-top: 1rem; justify-content: flex-end;">
+                  <button type="button" id="btn-cancel-edit-notif" class="action-btn d-none"
+                    style="min-width: 120px; font-size: 0.8rem; padding: 0.5rem 1rem;">Cancel Edit</button>
+                  <button type="submit" id="btn-submit-broadcast" class="action-btn primary-btn"
+                    style="min-width: 150px; font-size: 0.8rem; padding: 0.5rem 1.25rem;">Broadcast Notice</button>
+                </div>
+              </form>
+            </div>
+
+            <!-- Create Poll form card -->
+            <div class="detail-card" style="padding: 1.25rem; margin-bottom: 0;">
+              <h3 style="margin-bottom: 1rem;" id="poll-form-title">Create Poll</h3>
+              <form id="poll-broadcast-form">
+                <input type="hidden" id="poll-id" value="">
+                <div class="form-group">
+                  <label for="poll-question">Poll Question</label>
+                  <input type="text" id="poll-question" class="form-control"
+                    placeholder="e.g. Which workshop should we run next month?" required>
+                </div>
+
+                <div class="form-group">
+                  <label>Options (min 2)</label>
+                  <div id="poll-options-list" style="display: flex; flex-direction: column; gap: 0.5rem;">
+                    <div class="poll-option-row" style="display: flex; gap: 0.35rem;">
+                      <input type="text" class="form-control poll-option-input" placeholder="Option 1" required>
+                    </div>
+                    <div class="poll-option-row" style="display: flex; gap: 0.35rem;">
+                      <input type="text" class="form-control poll-option-input" placeholder="Option 2" required>
+                    </div>
+                  </div>
+                  <button type="button" id="btn-add-poll-option" class="action-btn"
+                    style="margin-top: 0.5rem; padding: 0.3rem 0.65rem; font-size: 0.72rem;">+ Add Option</button>
+                </div>
+
+                <div class="form-group"
+                  style="flex-direction: row; align-items: center; gap: 0.5rem; margin-top: 0.25rem;">
+                  <input type="checkbox" id="poll-allow-revote" style="width: 16px; height: 16px; cursor: pointer;"
+                    checked>
+                  <label for="poll-allow-revote"
+                    style="cursor: pointer; text-transform: none; font-size: 0.8rem; font-weight: 500; margin-bottom: 0;">Allow
+                    students to change their vote while poll is open</label>
+                </div>
+
+                <div class="form-group"
+                  style="flex-direction: row; align-items: center; gap: 0.5rem; margin-top: 0.25rem;">
+                  <input type="checkbox" id="poll-show-results-before-vote"
+                    style="width: 16px; height: 16px; cursor: pointer;">
+                  <label for="poll-show-results-before-vote"
+                    style="cursor: pointer; text-transform: none; font-size: 0.8rem; font-weight: 500; margin-bottom: 0;">Show
+                    live results to students before they vote</label>
+                </div>
+
+                <div style="display: flex; gap: 0.5rem; margin-top: 1rem; justify-content: flex-end;">
+                  <button type="button" id="btn-cancel-edit-poll" class="action-btn d-none"
+                    style="min-width: 120px; font-size: 0.8rem; padding: 0.5rem 1rem;">Cancel Edit</button>
+                  <button type="submit" id="btn-submit-poll" class="action-btn primary-btn"
+                    style="min-width: 150px; font-size: 0.8rem; padding: 0.5rem 1.25rem;">Post Poll</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Polls layout -->
+          <div class="section-card animate-fade"
+            style="padding: 1.25rem; background-color: var(--card-bg); margin-bottom: 1.5rem;">
+            <h3
+              style="color: var(--accent-orange); font-size: 1.05rem; margin-bottom: 1rem; border-bottom: 2px solid var(--border-color); padding-bottom: 0.5rem;">
+              Club Polls</h3>
+            <div id="polls-list-container" style="display: flex; flex-direction: column; gap: 1rem;">
+              <!-- populated programmatically with Polls -->
+            </div>
+          </div>
+
+          <!-- Timeline Notice layout -->
+          <div class="section-card animate-fade" style="padding: 1.25rem; background-color: var(--card-bg);">
+            <h3
+              style="color: var(--primary-blue); font-size: 1.05rem; margin-bottom: 1rem; border-bottom: 2px solid var(--border-color); padding-bottom: 0.5rem;">
+              Club Announcements</h3>
+            <div id="announcements-list-container" style="display: flex; flex-direction: column; gap: 1rem;">
+              <!-- populated programmatically with Notices -->
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- Mobile Navigation drawer is activated via hamburger toggle -->
+
+
+
+  <!-- Footer Realignment: DC first (with logo near), Affiliated second, Al-Ameen third -->
+  <footer>
+    <div class="app-container"
+      style="padding: 0 1rem; display: flex; flex-direction: column; gap: 0.5rem; justify-content: center; align-items: center; text-align: center;">
+      <p
+        style="font-weight: 700; color: var(--text-primary); margin: 0; font-size: 0.85rem; letter-spacing: 0.5px; display: inline-flex; align-items: center; gap: 0.5rem;">
+        <img id="secret-settings-logo" src="logo_club.png" alt="Developer Club Logo"
+          style="height: 20px; object-fit: contain; cursor: pointer;" title="Double-click for settings configurations">
+        <span>Developer Club</span>
+      </p>
+      <p style="color: var(--text-secondary); margin: 0; font-size: 0.75rem; font-weight: 500;">Affiliated with CSE
+        Webrania Association</p>
+      <p style="color: var(--text-secondary); margin: 0; font-size: 0.72rem; font-weight: 500;">Al-Ameen Engineering
+        College</p>
+
+      <div
+        style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.35rem; font-size: 0.7rem; justify-content: center;">
+        <a href="mailto:cse.devloperclub@gmail.com"
+          style="color: var(--primary-blue-light); text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+            <polyline points="22,6 12,13 2,6" />
+          </svg>
+          cse.devloperclub@gmail.com
+        </a>
+        <span style="color: var(--border-color);">|</span>
+        <a href="https://instagram.com/webrania_aec" target="_blank"
+          style="color: #d62976; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+            <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+            <line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
+          </svg>
+          @webrania_aec
+        </a>
+      </div>
+    </div>
+  </footer>
+
+
+
+  <!-- MODAL: Auth Sign In / Create Profile -->
+  <div class="modal-overlay" id="modal-auth">
+    <div class="modal-card" style="max-width: 380px;">
+
+      <div id="auth-step-signin">
+        <div class="modal-header" style="justify-content: center; position: relative;">
+          <h3>Student Sign In</h3>
+          <button class="icon-btn" id="btn-close-auth" style="border: none; position: absolute; right: 15px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body text-center">
+          <div class="auth-logos">
+            <img src="logo_club.png" alt="Developer Club">
+          </div>
+          <p class="kpi-subtext" style="margin-bottom: 1.5rem;">Enter your student email or admin email address to sign
+            in.</p>
+          <form id="auth-signin-form">
+            <div class="form-group text-left" style="text-align: left;">
+              <label for="auth-signin-email">Email Address</label>
+              <input type="text" id="auth-signin-email" class="form-control" placeholder="e.g. student@gmail.com"
+                required>
+            </div>
+            <button type="submit" class="action-btn primary-btn w-full"
+              style="margin-top: 1rem; padding: 0.75rem;">Enter Password</button>
+          </form>
+          <p class="kpi-subtext" style="margin-top: 1.5rem;">
+            New club member? <a href="#" id="auth-trigger-signup"
+              style="color: var(--primary-blue-light); font-weight: 600;">Create Student Profile</a>
+          </p>
+        </div>
+      </div>
+
+      <div id="auth-step-signup" class="d-none">
+        <div class="modal-header" style="justify-content: center; position: relative;">
+          <h3>Create Club Profile</h3>
+          <button class="icon-btn" id="btn-close-signup" style="border: none; position: absolute; right: 15px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <form id="auth-signup-form">
+            <div class="form-group">
+              <label>Full Student Name</label>
+              <input type="text" id="signup-name" class="form-control" placeholder="e.g. MOHAMED IRFAN M" required>
+              <span class="field-error" id="err-signup-name"></span>
+            </div>
+            <div class="form-group">
+              <label>Register / Roll Number</label>
+              <input type="text" id="signup-roll" class="form-control" placeholder="e.g. 730224104011"
+                inputmode="numeric" required>
+              <span class="field-error" id="err-signup-roll"></span>
+            </div>
+            <div class="form-group">
+              <label>Department</label>
+              <select id="signup-dept" class="form-control" required>
+                <!-- populated programmatically -->
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Academic Year</label>
+              <select id="signup-year" class="form-control" required>
+                <!-- populated programmatically -->
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Email</label>
+              <input type="email" id="signup-email" class="form-control" placeholder="student@gmail.com" required>
+              <span class="field-error" id="err-signup-email"></span>
+            </div>
+            <div class="form-group">
+              <label>Password</label>
+              <div style="position: relative;">
+                <input type="password" id="signup-password" class="form-control"
+                  placeholder="Create a strong password..." required style="padding-right: 2.25rem;">
+                <button type="button" class="password-eye-toggle" data-target="signup-password"
+                  aria-label="Show password"
+                  style="position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--text-secondary); display: flex; align-items: center; padding: 2px;">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </button>
+              </div>
+              <span class="field-error" id="err-signup-password"></span>
+            </div>
+            <div class="form-group">
+              <label for="signup-confirm-password">Confirm Password</label>
+              <div style="position: relative;">
+                <input type="password" id="signup-confirm-password" class="form-control"
+                  placeholder="Re-enter the same password..." required style="padding-right: 2.25rem;">
+                <button type="button" class="password-eye-toggle" data-target="signup-confirm-password"
+                  aria-label="Show password"
+                  style="position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--text-secondary); display: flex; align-items: center; padding: 2px;">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </button>
+              </div>
+              <span class="field-error" id="err-signup-confirm-password"></span>
+            </div>
+            <div class="form-group">
+              <label for="signup-phone">Mobile Number</label>
+              <input type="text" id="signup-phone" class="form-control" placeholder="e.g. 9876543210"
+                inputmode="numeric" maxlength="10" required>
+              <span class="field-error" id="err-signup-phone"></span>
+            </div>
+            <div class="form-group">
+              <label for="signup-whatsapp">WhatsApp Number</label>
+              <input type="text" id="signup-whatsapp" class="form-control" placeholder="e.g. 9876543210"
+                inputmode="numeric" maxlength="10" required>
+              <span class="field-error" id="err-signup-whatsapp"></span>
+            </div>
+
+            <div style="border-top: 1px solid var(--border-color); margin: 1rem 0; padding-top: 1rem;">
+              <h4
+                style="font-size: 0.8rem; text-transform: uppercase; color: var(--accent-orange); margin-bottom: 0.75rem;">
+                Coding Profile Directories</h4>
+              <div class="form-group">
+                <label>GitHub Profile Link</label>
+                <input type="text" id="signup-github" class="form-control" placeholder="https://github.com/username">
+                <span class="field-error" id="err-signup-github"></span>
+              </div>
+              <div class="form-group">
+                <label>LeetCode Profile Link</label>
+                <input type="text" id="signup-leetcode" class="form-control"
+                  placeholder="https://leetcode.com/u/username">
+                <span class="field-error" id="err-signup-leetcode"></span>
+              </div>
+              <div class="form-group">
+                <label>LinkedIn Profile Link</label>
+                <input type="text" id="signup-linkedin" class="form-control"
+                  placeholder="https://linkedin.com/in/username">
+                <span class="field-error" id="err-signup-linkedin"></span>
+              </div>
+            </div>
+
+            <button type="submit" class="action-btn primary-btn w-full"
+              style="padding: 0.75rem; margin-top: 0.5rem;">Extract Stats & Register</button>
+          </form>
+          <p class="kpi-subtext text-center" style="margin-top: 1rem;">
+            Already registered? <a href="#" id="auth-trigger-signin"
+              style="color: var(--primary-blue-light); font-weight: 600;">Sign In</a>
+          </p>
+        </div>
+      </div>
+
+      <div id="auth-step-otp" class="d-none">
+        <div class="modal-header" style="justify-content: space-between; position: relative;">
+          <button class="icon-btn" id="btn-back-auth-step" style="border: none; position: absolute; left: 15px;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="19" y1="12" x2="5" y2="12" />
+              <polyline points="12 19 5 12 12 5" />
+            </svg>
+          </button>
+          <h3 style="margin: 0 auto;">Sign In Password</h3>
+        </div>
+        <div class="modal-body text-center">
+          <p class="kpi-subtext" style="margin-bottom: 1.25rem;">Enter your credentials password to authenticate.</p>
+
+
+
+          <form id="auth-otp-form" style="text-align: left;">
+            <div class="form-group">
+              <label for="auth-signin-password">Password</label>
+              <div style="position: relative;">
+                <input type="password" id="auth-signin-password" class="form-control" placeholder="Enter password..."
+                  required style="letter-spacing: 2px; padding-right: 2.25rem;">
+                <button type="button" class="password-eye-toggle" data-target="auth-signin-password"
+                  aria-label="Show password"
+                  style="position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--text-secondary); display: flex; align-items: center; padding: 2px;">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <button type="submit" id="auth-otp-submit-btn" class="action-btn primary-btn w-full"
+              style="padding: 0.75rem; margin-top: 1rem;">Verify Password</button>
+          </form>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MODAL: Add Certification -->
+  <div class="modal-overlay" id="modal-add-certification">
+    <div class="modal-card" style="max-width: 460px;">
+      <div class="modal-header"
+        style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.75rem;">
+        <h3 style="margin: 0; font-size: 1rem; font-weight: 700;">Add Certification</h3>
+        <button class="icon-btn" onclick="closeModal('modal-add-certification')"
+          style="border: none; background: transparent; cursor: pointer; color: var(--text-secondary); font-size: 1.1rem; display: flex; align-items: center; justify-content: center; padding: 4px;">✕</button>
+      </div>
+      <div class="modal-body" style="padding-top: 1rem;">
+        <form id="certification-form">
+          <div class="form-group">
+            <label for="cert-url">Certificate URL</label>
+            <div style="display: flex; gap: 0.5rem;">
+              <input type="url" id="cert-url" class="form-control" placeholder="https://www.credly.com/badges/..."
+                required style="flex: 1;">
+              <button type="button" id="btn-fetch-cert-info" class="action-btn"
+                style="white-space: nowrap; padding: 0.5rem 0.75rem; font-size: 0.78rem;">Fetch Details</button>
+            </div>
+            <span class="field-error" id="err-cert-url"></span>
+          </div>
+
+          <div id="cert-fetched-fields" class="d-none"
+            style="margin-top: 0.75rem; border-top: 1px dashed var(--border-color); padding-top: 0.75rem;">
+            <p class="kpi-subtext" style="margin-bottom: 0.75rem;">Confirm the details below (edit anything that's
+              wrong) before saving:</p>
+            <div class="form-group">
+              <label for="cert-name">Certificate Name</label>
+              <input type="text" id="cert-name" class="form-control"
+                placeholder="e.g. AWS Certified Cloud Practitioner">
+            </div>
+            <div class="form-group">
+              <label for="cert-id">Certificate ID</label>
+              <input type="text" id="cert-id" class="form-control" placeholder="e.g. AB12CD34">
+            </div>
+            <div class="form-group">
+              <label for="cert-platform">Platform</label>
+              <input type="text" id="cert-platform" class="form-control" placeholder="e.g. AWS, Coursera, Credly">
+            </div>
+          </div>
+
+          <button type="submit" id="btn-submit-certification" class="action-btn primary-btn w-full"
+            style="margin-top: 1rem; padding: 0.625rem;" disabled>Save Certification</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Evaluation & CV Preview -->
+  <div class="modal-overlay" id="modal-evaluate">
+    <div class="modal-card" style="max-width: 580px;">
+      <div class="modal-header">
+        <h3>Evaluate Student Coding & Resume</h3>
+        <button class="icon-btn" id="btn-close-evaluate" style="border: none;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body" style="max-height: 70vh; overflow-y: auto; padding-right: 0.5rem;">
+        <div style="margin-bottom: 1.25rem;">
+          <h4 id="eval-student-name">Student Name</h4>
+          <p class="kpi-subtext" id="eval-student-roll-dept">Roll number • CSE 4th Year</p>
+        </div>
+
+        <form id="evaluation-form">
+          <!-- Admin View/Edit of student profile handles -->
+          <div
+            style="border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 0.75rem; margin-bottom: 1.25rem; background-color: var(--accent-bg);">
+            <h4
+              style="font-size: 0.85rem; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 0.75rem;">
+              Student Profile Credentials</h4>
+            <div class="form-group" style="margin-bottom: 0.5rem;">
+              <label style="font-size: 0.7rem; font-weight:600;">GitHub Handle</label>
+              <input type="text" id="eval-student-github" class="form-control"
+                style="padding: 0.35rem; font-size: 0.8rem; height: 32px;">
+            </div>
+            <div class="form-group" style="margin-bottom: 0.5rem;">
+              <label style="font-size: 0.7rem; font-weight:600;">LeetCode Handle</label>
+              <input type="text" id="eval-student-leetcode" class="form-control"
+                style="padding: 0.35rem; font-size: 0.8rem; height: 32px;">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label style="font-size: 0.7rem; font-weight:600;">LinkedIn Handle</label>
+              <input type="text" id="eval-student-linkedin" class="form-control"
+                style="padding: 0.35rem; font-size: 0.8rem; height: 32px;">
+            </div>
+          </div>
+
+          <div
+            style="border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 0.75rem; margin-bottom: 1.25rem; background-color: var(--accent-bg);">
+            <h4
+              style="font-size: 0.85rem; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 0.75rem;">
+              Interactive Scorecard Edit</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label>GitHub Contr.</label>
+                <input type="number" id="eval-github-contr" class="form-control number-font" value="0">
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label>LeetCode Solved</label>
+                <input type="number" id="eval-leetcode-solved" class="form-control number-font" value="0">
+              </div>
+            </div>
+          </div>
+
+          <!-- Virtual CV PDF Previewer Section -->
+          <div class="form-group" style="margin-bottom: 1.25rem;">
+            <label>Virtual Resume Preview (Admin Reader)</label>
+            <div id="eval-cv-iframe-container" style="margin-top: 0.25rem;">
+              <!-- virtual-cv-viewer injected here -->
+            </div>
+            <div id="eval-cv-link-container" style="padding-top: 0.5rem;"></div>
+          </div>
+
+          <div class="form-group">
+            <label for="eval-cv-status">Placement CV Evaluation Status</label>
+            <select id="eval-cv-status" class="form-control">
+              <option value="Pending">Pending Evaluation (Under Review)</option>
+              <option value="Approved">Approved (Good Portfolio)</option>
+              <option value="Needs Revision">Needs Revision (Send Remarks)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="eval-cv-feedback">Reviewer Feedback Remarks</label>
+            <textarea id="eval-cv-feedback" class="form-control"
+              placeholder="Write feedback suggestions to guide student improvement..."
+              style="min-height: 80px;"></textarea>
+          </div>
+
+          <div class="form-group" style="flex-direction: row; align-items: center; gap: 0.5rem; margin-top: 0.5rem;">
+            <input type="checkbox" id="eval-student-active" style="width: 16px; height: 16px; cursor: pointer;">
+            <label for="eval-student-active"
+              style="cursor: pointer; text-transform: none; font-size: 0.85rem; font-weight: 500;">Set member as active
+              in club directory</label>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="action-btn" id="btn-cancel-evaluate">Cancel</button>
+        <button class="action-btn primary-btn" id="btn-save-evaluate">Save Evaluation</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Student Profile Details View for Admins / Peer Members -->
+  <div class="modal-overlay" id="modal-student-profile-details">
+    <div class="modal-card" style="max-width: 440px; border-top: 4px solid var(--primary-blue-light);">
+      <div class="modal-header">
+        <h3>Club Member Profile</h3>
+        <button class="icon-btn" id="btn-close-profile-details" style="border: none;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body" id="profile-details-body" style="padding: 1.5rem 1.25rem;">
+        <!-- Injected dynamically by JS -->
+      </div>
+      <div class="modal-footer" style="justify-content: flex-end;">
+        <button class="action-btn" id="btn-close-profile-details-footer">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Custom Prompt / Confirm Dialog (Replaces native alert/confirm/prompt window dialogue) -->
+  <div class="modal-overlay" id="modal-custom-dialog" style="z-index: 1100;">
+    <div class="modal-card" style="max-width: 380px; border-top: 4px solid var(--accent-orange);">
+      <div class="modal-header">
+        <h3 id="custom-dialog-title">Confirm Action</h3>
+      </div>
+      <div class="modal-body" style="padding: 1.25rem 1rem;">
+        <p id="custom-dialog-message"
+          style="font-size: 0.88rem; line-height: 1.5; color: var(--text-primary); margin-bottom: 1rem;"></p>
+        <div id="custom-dialog-input-container" class="d-none">
+          <input type="text" id="custom-dialog-text-input" class="form-control" placeholder="Type here..."
+            style="font-size: 0.82rem; padding: 0.5rem;">
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 0.5rem;">
+        <button class="action-btn" id="btn-custom-dialog-cancel">Cancel</button>
+        <button class="action-btn primary-btn" id="btn-custom-dialog-confirm">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Global Toast Notification Alert container overlay -->
+  <div id="toast-container"
+    style="position: fixed; bottom: 20px; left: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 0.5rem; pointer-events: none;">
+  </div>
+
+  <script type="module" src="main.js"></script>
+
+</body>
+
+</html>
