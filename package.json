@@ -1,0 +1,15 @@
+{
+  "name": "developer-club-dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Al-Ameen Engineering College Developer Club admin dashboard.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^8.2.2"
+  }
+}

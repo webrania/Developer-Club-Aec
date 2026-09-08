@@ -21,7 +21,7 @@ import {
   YEARS 
 } from './mockData.js';
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
+import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
 import {
   getAuth,
   createUserWithEmailAndPassword,
@@ -67,6 +67,24 @@ const firebaseConfig = {
   measurementId: viteEnv.VITE_FIREBASE_MEASUREMENT_ID
 };
 
+// Temporary diagnostic: shows exactly what Vite actually injected at
+// runtime (apiKey partially masked), without ever printing the full key.
+// If this logs "MISSING" for any field, .env isn't reaching the app at all
+// (wrong filename/location, or the dev server was never restarted after
+// saving it) — that's a different problem than a key Google is rejecting,
+// where every field here would print fine. Safe to delete this block once
+// the auth/invalid-api-key issue is resolved.
+console.log('[Firebase config check]', {
+  apiKey: firebaseConfig.apiKey
+    ? firebaseConfig.apiKey.slice(0, 6) + '...' + firebaseConfig.apiKey.slice(-4)
+    : 'MISSING',
+  authDomain: firebaseConfig.authDomain || 'MISSING',
+  projectId: firebaseConfig.projectId || 'MISSING',
+  storageBucket: firebaseConfig.storageBucket || 'MISSING',
+  messagingSenderId: firebaseConfig.messagingSenderId || 'MISSING',
+  appId: firebaseConfig.appId || 'MISSING'
+});
+
 // Both initializeApp() and getFirestore() are wrapped too — previously only
 // getAuth() below had a try/catch, but a missing/invalid config can make
 // either of these throw as well, which would kill the whole script the same
@@ -77,16 +95,28 @@ let firebaseApp = null;
 let firebaseAuth = null;
 let firestoreDb = null;
 try {
-  firebaseApp = initializeApp(firebaseConfig);
+  // Vite's dev server can re-run this module on a hot reload without a full
+  // page refresh. initializeApp() throws "Firebase: Firebase App named
+  // '[DEFAULT]' already exists" the second time it's called with the same
+  // name — which lands in this catch block, leaving firebaseAuth stuck at
+  // null for the rest of that dev session (until you hard-refresh) even
+  // though .env is perfectly fine. Reusing the existing app instead of
+  // re-creating it avoids that entirely.
+  firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
   try {
     firebaseAuth = getAuth(firebaseApp);
   } catch (err) {
+    const maskedKey = firebaseConfig.apiKey
+      ? (firebaseConfig.apiKey.length + ' chars: ' + firebaseConfig.apiKey.slice(0, 6) + '...' + firebaseConfig.apiKey.slice(-4))
+      : 'MISSING / EMPTY';
     console.error(
-      '[Firebase] Failed to initialize Auth — check that .env has all ' +
-      'VITE_FIREBASE_* values set (copy .env.example to .env if you have ' +
-      "not already), or that your host's Environment Variables include them.",
+      '[Firebase] Failed to initialize Auth. apiKey Vite actually injected: ' + maskedKey,
       err
     );
+    if (typeof showToast === 'function') {
+      const detail = (err && (err.code || err.message)) || 'unknown error';
+      showToast('Firebase Auth failed: ' + detail + ' | apiKey seen: ' + maskedKey, 15000);
+    }
   }
   try {
     // Registered Courses are the one collection that must be shared across
@@ -106,6 +136,10 @@ try {
     'the rest of the dashboard will still work.',
     err
   );
+  if (typeof showToast === 'function') {
+    const detail = (err && (err.code || err.message)) || 'unknown error';
+    showToast('Firebase failed to start: ' + detail, 10000);
+  }
 }
 const COURSES_COLLECTION = 'registered_courses';
 // Certifications must show up in the Admin Dashboard the moment a student
@@ -116,6 +150,21 @@ const CERTIFICATIONS_COLLECTION = 'certifications';
 // Creates a real Firebase account and emails a verification link.
 // Never stores the password anywhere in our own data.
 async function firebaseSignUp(email, password) {
+  // firebaseAuth is only null when Firebase itself failed to initialize
+  // (see the try/catch around getAuth() near the top of this file) —
+  // almost always a missing/incomplete local .env on a fresh clone, or
+  // Environment Variables not set on a host. Without this check, calling
+  // createUserWithEmailAndPassword(null, ...) crashes deep inside the
+  // Firebase SDK with a raw "Cannot read properties of null (reading
+  // 'app')" TypeError, which is meaningless to anyone seeing it in the UI.
+  if (!firebaseAuth) {
+    return {
+      success: false,
+      error: "Sign-up isn't available right now — Firebase isn't configured " +
+        "(missing or incomplete .env). See README.md's Setup section, then " +
+        "restart `npm run dev` after saving .env."
+    };
+  }
   try {
     const cred = await createUserWithEmailAndPassword(firebaseAuth, email, password);
     await sendEmailVerification(cred.user);
@@ -127,6 +176,14 @@ async function firebaseSignUp(email, password) {
 
 // Signs in against Firebase only. Does not check state.students at all.
 async function firebaseSignIn(email, password) {
+  if (!firebaseAuth) {
+    return {
+      success: false,
+      error: "Sign-in isn't available right now — Firebase isn't configured " +
+        "(missing or incomplete .env). See README.md's Setup section, then " +
+        "restart `npm run dev` after saving .env."
+    };
+  }
   try {
     const cred = await signInWithEmailAndPassword(firebaseAuth, email, password);
     return { success: true, user: cred.user };
@@ -344,11 +401,30 @@ async function loadData() {
     fallbackToMock();
   }
 
-  // Courses always come from Firestore regardless of dbMode — this is the
-  // one collection that has to be identical for every signed-in user and
-  // survive refresh/logout/reopen (see loadCoursesFromCloud above).
-  await loadCoursesFromCloud();
-  await loadCertificationsFromCloud();
+  // Perf: courses and certifications live in Firestore. This used to
+  // `await` both, one after the other, before populateFilterOptions(),
+  // setupEventListeners(), renderApp() or initBackgroundAnimation() ran —
+  // meaning on a slow/mobile connection, every button and the background
+  // animation stayed dead for however long two sequential network
+  // round-trips took. Neither is needed for the initial paint: the About
+  // tab, KPIs, and recalculateScores() never read them, and
+  // fallbackToMock() above already filled state.courses from the local
+  // cache so the Courses tab isn't even empty in the meantime. Every
+  // course/certification view also already re-fetches fresh data itself
+  // the instant it's opened (see switchTab), so there's no need to block
+  // boot on these — fire them in parallel and let them resolve whenever
+  // they resolve.
+  loadCoursesFromCloud().then(() => {
+    if (state.currentTab === 'view-courses') {
+      renderCoursesBrowse();
+      if (state.viewMode === 'admin') renderCoursesManageList();
+    }
+  });
+  loadCertificationsFromCloud().then(() => {
+    if (state.currentTab === 'view-admin-dashboard') {
+      renderAdminCertificationsList();
+    }
+  });
 
   try {
     state.followingList = JSON.parse(safeGetItem('alameen_following_list')) || [];
@@ -889,6 +965,7 @@ function setupEventListeners() {
 
   document.getElementById('btn-close-evaluate').addEventListener('click', () => closeModal('modal-evaluate'));
   document.getElementById('btn-cancel-evaluate').addEventListener('click', () => closeModal('modal-evaluate'));
+  document.getElementById('btn-delete-student-record').addEventListener('click', deleteStudentRecord);
   document.getElementById('evaluation-form').addEventListener('submit', handleEvaluationSave);
   
   document.getElementById('btn-save-evaluate').addEventListener('click', () => {
@@ -3505,6 +3582,46 @@ function openEvaluationModal(studentId) {
   openModal('modal-evaluate');
 }
 
+async function deleteStudentRecord() {
+  const studentId = state.activeEvaluationStudentId;
+  if (!studentId) return;
+
+  const student = state.students.find(s => s.id === studentId);
+  if (!student) return;
+
+  // This only removes the dashboard profile (leaderboard entry, CV status,
+  // scores, etc.) from local storage — it does NOT delete the student's
+  // actual Firebase Auth account. Firebase Auth accounts can only be
+  // deleted by the account owner themselves or via the Firebase Admin SDK
+  // (which requires a backend this project intentionally doesn't have —
+  // see CHANGES.md). If the goal is letting them fully re-register with
+  // the same email, the admin also has to remove that user manually in
+  // Firebase Console -> Authentication -> Users -> (find by email) -> Delete.
+  const confirmed = await window.showCustomConfirm(
+    'Delete Student Record',
+    `Remove ${student.name}'s dashboard profile (scores, CV, activity)? ` +
+    `This does NOT delete their sign-in account — to let them fully ` +
+    `re-register with the same email, you'll also need to delete their ` +
+    `user in Firebase Console -> Authentication -> Users.`
+  );
+  if (!confirmed) return;
+
+  state.students = state.students.filter(s => s.id !== studentId);
+  state.followingList = (state.followingList || []).filter(id => id !== studentId);
+  saveCurrentState();
+
+  closeModal('modal-evaluate');
+  state.activeEvaluationStudentId = null;
+
+  renderApp();
+  if (state.currentTab === 'view-leaderboard') renderLeaderboard();
+  if (typeof renderDirectoryList === 'function') renderDirectoryList();
+
+  if (typeof showToast === 'function') {
+    showToast(`${student.name}'s dashboard profile was removed.`);
+  }
+}
+
 function handleEvaluationSave(e) {
   e.preventDefault();
   if (!state.activeEvaluationStudentId) return;
@@ -3684,10 +3801,12 @@ function renderCharts() {
 
 function renderApp() {
   const triggerBtn = document.getElementById('btn-login-trigger');
+  const mobileTriggerBtn = document.getElementById('btn-login-trigger-mobile');
   const profileSummary = document.getElementById('user-profile-summary');
   
   if (state.loggedInUser) {
     triggerBtn.classList.add('d-none');
+    if (mobileTriggerBtn) mobileTriggerBtn.classList.add('d-none');
     profileSummary.classList.remove('d-none');
     profileSummary.style.display = 'flex';
     document.getElementById('header-user-name').textContent = state.loggedInUser.name;
@@ -3698,6 +3817,7 @@ function renderApp() {
     document.getElementById('tab-profile-trigger').textContent = 'My Profile';
   } else {
     triggerBtn.classList.remove('d-none');
+    if (mobileTriggerBtn) mobileTriggerBtn.classList.remove('d-none');
     profileSummary.classList.add('d-none');
     profileSummary.style.display = 'none';
   }
@@ -4361,7 +4481,7 @@ function renderAnnouncementsList() {
 
 window.openEvaluationModal = openEvaluationModal;
 
-function showToast(message) {
+function showToast(message, duration = 3000) {
   const container = document.getElementById('toast-container');
   if (!container) return;
   const toast = document.createElement('div');
@@ -4385,7 +4505,7 @@ function showToast(message) {
     toast.style.opacity = '0';
     toast.style.transition = 'opacity 0.3s ease';
     setTimeout(() => toast.remove(), 300);
-  }, 3000);
+  }, duration);
 }
 
 function handleExportExcelDatabase() {

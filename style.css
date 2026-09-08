@@ -25,6 +25,11 @@
   --badge-inactive-text: #f87171;
   --badge-unverified-bg: #78350f;
   --badge-unverified-text: #fbbf24;
+
+  /* Translucent stand-in for --card-bg, used only on small screens so the
+     ambient canvas animation and body gradient can show through blurred
+     instead of being fully hidden behind solid cards. */
+  --card-bg-glass: rgba(24, 24, 27, 0.72);
 }
 
 [data-theme="light"] {
@@ -44,6 +49,8 @@
   --badge-inactive-text: #991b1b;
   --badge-unverified-bg: #fef3c7;
   --badge-unverified-text: #92400e;
+
+  --card-bg-glass: rgba(255, 255, 255, 0.72);
 }
 
 /* Reset */
@@ -260,30 +267,84 @@ header {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  /* Without this, a flex child's default min-width is "auto" (its content's
+     min-content size), which is however wide brand-text's un-wrapped
+     subtitle needs to be — on a narrow phone that's wider than the screen,
+     so the row overflowed and shoved/squeezed the logo image next to it
+     instead of leaving it alone. min-width: 0 lets brand-text actually
+     shrink/truncate below that, which is what stops the squeeze. */
+  min-width: 0;
 }
 
 .branding-logos img {
   height: 44px;
   width: auto;
   object-fit: contain;
+  /* Locks the logo to its real size always. Flex items shrink by default
+     (flex-shrink: 1), and an <img> is a valid shrink target like anything
+     else — on a cramped header that showed up as the logo rendering
+     narrower than its own aspect ratio (and visually off-center in its box)
+     instead of staying put while the text around it wrapped/truncated. */
+  flex-shrink: 0;
+}
+
+.brand-text {
+  /* Same min-width: 0 reasoning as .branding-group — a text block is a flex
+     child too, and needs this before overflow/ellipsis rules below can
+     actually take effect instead of being ignored. */
+  min-width: 0;
 }
 
 .brand-text h1 {
   font-size: 1.15rem;
   line-height: 1.2;
   color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .brand-text p {
   font-size: 0.7rem;
   color: var(--text-secondary);
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .controls-group {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  /* Same reasoning as .branding-group: without this, the signed-in profile
+     block's name text can force this side of the header wider than the
+     screen instead of truncating, squeezing the logo on the other side. */
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+#user-profile-summary {
+  min-width: 0;
+}
+
+#user-profile-summary img {
+  flex-shrink: 0;
+}
+
+#header-user-name {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+}
+
+/* Only ever shown inside the mobile drawer version of .nav-tabs — see the
+   max-width: 991px block below, which is where nav-tabs itself switches
+   from a horizontal desktop bar to a slide-in drawer. */
+#btn-login-trigger-mobile {
+  display: none;
 }
 
 /* Theme and View Switches */
@@ -297,6 +358,7 @@ header {
   align-items: center;
   justify-content: center;
   transition: all 0.2s ease;
+  flex-shrink: 0;
 }
 
 .icon-btn:hover {
@@ -970,6 +1032,64 @@ tr:hover td {
   font-size: 0.85rem;
 }
 
+/* Podium was 3 fixed 155px-wide spots + gaps (~513px min) - overflowed any
+   screen under ~530px. Below 560px, switch to flexible percentage widths so
+   the 3 spots always fit the viewport instead of forcing horizontal scroll
+   or spilling out of the card. */
+@media (max-width: 560px) {
+  .podium-section {
+    gap: 0.5rem;
+    padding: 0.25rem 0;
+  }
+
+  .podium-spot {
+    width: 31%;
+    padding: 0.85rem 0.4rem;
+  }
+
+  .podium-spot.first {
+    min-height: 175px;
+  }
+
+  .podium-spot.second {
+    min-height: 150px;
+  }
+
+  .podium-spot.third {
+    min-height: 135px;
+  }
+
+  .podium-badge {
+    font-size: 1.4rem;
+  }
+
+  .podium-name {
+    font-size: 0.7rem;
+  }
+
+  .podium-score {
+    font-size: 0.72rem;
+  }
+}
+
+/* Very narrow phones: even truncated, "Al-Ameen Engineering College •
+   Webrania Association" competes with the logo/hamburger/theme-toggle for
+   space. Dropping it here (title + logo stay) is what actually guarantees
+   the logo never gets crowded, rather than relying on ellipsis alone. */
+@media (max-width: 420px) {
+  .brand-text p {
+    display: none;
+  }
+
+  .about-logos-header {
+    gap: 0.75rem !important;
+  }
+
+  .about-logos-header .about-logo-img {
+    height: 40px !important;
+  }
+}
+
 .personal-rank-banner {
   background-color: var(--accent-bg);
   border: 1.5px dashed var(--primary-blue-light);
@@ -1627,6 +1747,17 @@ footer {
   margin-top: auto;
 }
 
+@media (max-width: 420px) {
+  .footer-contact-row {
+    flex-direction: column !important;
+    gap: 0.5rem !important;
+  }
+
+  .footer-divider {
+    display: none;
+  }
+}
+
 /* Utility classes */
 .flex-between {
   display: flex;
@@ -1665,10 +1796,23 @@ footer {
   .app-container {
     padding: 1rem;
   }
-  
+
+  .header-inner {
+    padding: 0 0.75rem;
+    gap: 0.5rem;
+  }
 
   .controls-group {
     gap: 0.5rem;
+  }
+
+  #header-user-name {
+    max-width: 72px;
+  }
+
+  #user-profile-summary img {
+    width: 22px;
+    height: 22px;
   }
   
   .branding-logos img {
@@ -1686,6 +1830,21 @@ footer {
   .filter-panel {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  /* "Liquid glass" content blocks: on small screens the stacked, edge-to-edge
+     cards were fully opaque and covered almost the entire viewport, so the
+     ambient canvas particles (and the body's gradient) never showed. Swap
+     the solid --card-bg for a translucent one + a backdrop blur here only —
+     desktop keeps the solid cards, since there's enough space around them
+     for the animation to be visible anyway. */
+  .section-card,
+  .about-card,
+  .podium-spot,
+  .personal-rank-banner {
+    background-color: var(--card-bg-glass);
+    backdrop-filter: blur(14px) saturate(160%);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
   }
 }
 
@@ -1937,6 +2096,21 @@ footer {
 @media (max-width: 991px) {
   #btn-mobile-menu {
     display: flex !important;
+  }
+
+  /* Sign In moves out of the crowded header into the drawer on small
+     screens; header keeps only the hamburger, logo and theme toggle. */
+  #btn-login-trigger {
+    display: none;
+  }
+
+  #btn-login-trigger-mobile {
+    display: flex;
+    margin-top: auto;
+    border-top: 1px solid var(--border-color);
+    padding-top: 1rem !important;
+    color: var(--primary-blue) !important;
+    font-weight: 700 !important;
   }
 
   .nav-tabs {

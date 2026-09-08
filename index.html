@@ -22,8 +22,8 @@
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js">
   <link rel="modulepreload" href="https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js">
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
 </head>
 
 <body>
@@ -155,6 +155,13 @@
         Announcements
         <span id="notif-badge-count" class="badge d-none"
           style="margin-left: 0.25rem; background-color: var(--accent-orange); color: #ffffff; width: 8px; height: 8px; border-radius: 50%; padding: 0; display: inline-block; vertical-align: middle;"></span>
+      </button>
+      <!-- Mobile-drawer-only Sign In entry. Hidden on desktop (nav-tabs is a
+           horizontal bar there, not a drawer) and shown/hidden in sync with
+           the header's #btn-login-trigger by renderApp() in main.js. -->
+      <button class="tab-btn" id="btn-login-trigger-mobile"
+        onclick="document.getElementById('btn-login-trigger').click()">
+        Sign In
       </button>
     </nav>
 
@@ -1114,7 +1121,7 @@
       <p style="color: var(--text-secondary); margin: 0; font-size: 0.72rem; font-weight: 500;">Al-Ameen Engineering
         College</p>
 
-      <div
+      <div class="footer-contact-row"
         style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.35rem; font-size: 0.7rem; justify-content: center;">
         <a href="mailto:cse.devloperclub@gmail.com"
           style="color: var(--primary-blue-light); text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem;">
@@ -1125,7 +1132,7 @@
           </svg>
           cse.devloperclub@gmail.com
         </a>
-        <span style="color: var(--border-color);">|</span>
+        <span class="footer-divider" style="color: var(--border-color);">|</span>
         <a href="https://instagram.com/webrania_aec" target="_blank"
           style="color: #d62976; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 0.25rem;">
           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none"
@@ -1483,9 +1490,12 @@
           </div>
         </form>
       </div>
-      <div class="modal-footer">
-        <button class="action-btn" id="btn-cancel-evaluate">Cancel</button>
-        <button class="action-btn primary-btn" id="btn-save-evaluate">Save Evaluation</button>
+      <div class="modal-footer" style="justify-content: space-between;">
+        <button class="action-btn danger-btn" id="btn-delete-student-record" type="button">Delete Student Record</button>
+        <div style="display: flex; gap: 0.5rem;">
+          <button class="action-btn" id="btn-cancel-evaluate">Cancel</button>
+          <button class="action-btn primary-btn" id="btn-save-evaluate">Save Evaluation</button>
+        </div>
       </div>
     </div>
   </div>
