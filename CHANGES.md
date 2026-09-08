@@ -90,8 +90,27 @@ Environment Variables for a hosted deploy) — see the Deploying section in
 `README.md`. The fix only makes sure a *missing* build/config degrades
 gracefully instead of breaking the entire page.
 
-## Files unchanged, on purpose
-- `index.html`, `style.css`, `mockData.js` — no changes needed.
-- `package.json`, `vite.config.js` — still a standard Vite project, no
-  serverless build step required.
-- `logo_*.png` — static assets, untouched.
+## Latest Critical Bug Fixes & Architecture Updates
+
+### `main.js` — Auth Refresh, Instant Animation, Volunteer Sync & Cloud Student Roster
+
+1. **Instant Session Restore & Auto-Logout Prevention**:
+   - `state.loggedInUser` is now cached in browser `localStorage` (`alameen_logged_in_user`) on login/signup and restored immediately on DOM boot.
+   - Prevents auto-logout flash on page refresh while Firebase Auth asynchronously verifies session in the background.
+
+2. **Instant Background Animation Initialization**:
+   - `initBackgroundAnimation()` is now called immediately after `initTheme()` on `DOMContentLoaded`.
+   - Eliminates delayed canvas particle animation loading caused by serial network fetch chains.
+
+3. **Multi-Device Student Roster Cloud Sync (`students` collection)**:
+   - Added `STUDENTS_COLLECTION = 'students'` and cloud synchronization methods (`loadStudentsFromCloud`, `saveStudentToCloud`, `deleteStudentFromCloud`).
+   - Student signups and profile updates now save to Firestore cloud database so all devices (laptops, phones, tablets) display the full registered student roster and accurate active member KPIs (resolving 0 active users on laptop).
+
+4. **Admin Volunteer Selection Sync Fix**:
+   - Removed destructive regex cleanup filter `!/^vol_\d+$/.test(v.id)` in `loadData()` which was purging admin-selected volunteers on app startup.
+   - Updated generated volunteer document IDs to `volunteer_${Date.now()}` and ensured instant Firestore sync so all users see updated committee volunteers.
+
+5. **Mobile Screen UI & Tab Switching Fixes**:
+   - Added missing `closeModal('modal-auth')` call in signup pathways.
+   - Updated `switchTab()` to automatically close mobile drawer overlays (`.drawer-overlay`), reset page scroll position to top (`window.scrollTo`), and remove obsolete DOM selector references.
+
