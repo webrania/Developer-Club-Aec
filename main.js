@@ -27,6 +27,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendEmailVerification,
+  onAuthStateChanged,
   signOut as firebaseSignOutFn
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
 import {
@@ -146,6 +147,13 @@ const COURSES_COLLECTION = 'registered_courses';
 // submits one, regardless of which device/browser the admin is on — so
 // they follow the exact same Firestore-first pattern as courses.
 const CERTIFICATIONS_COLLECTION = 'certifications';
+// Volunteers must be visible to every signed-in user on every device the
+// moment the admin adds/edits/removes one — same reasoning as courses and
+// certifications above. Previously this only ever went through
+// saveVolunteers() into the browser's own localStorage, so an admin's
+// changes were invisible to anyone else (or the admin themself on a
+// different device/browser).
+const VOLUNTEERS_COLLECTION = 'volunteers';
 
 // Creates a real Firebase account and emails a verification link.
 // Never stores the password anywhere in our own data.
@@ -192,9 +200,23 @@ async function firebaseSignIn(email, password) {
   }
 }
 
+// Firebase itself already throttles repeated verification emails (it's what
+// throws auth/too-many-requests), but by then the person has already waited
+// through a failed attempt with no explanation. Tracking our own cooldown
+// lets us tell them to wait *before* they hit that wall, with a clear reason
+// instead of a raw Firebase error.
+let lastVerificationResendAt = 0;
+const VERIFICATION_RESEND_COOLDOWN_MS = 60 * 1000;
+
 async function firebaseResendVerification() {
+  if (Date.now() - lastVerificationResendAt < VERIFICATION_RESEND_COOLDOWN_MS) {
+    const waitSecs = Math.ceil((VERIFICATION_RESEND_COOLDOWN_MS - (Date.now() - lastVerificationResendAt)) / 1000);
+    showToast(`Please wait ${waitSecs}s before requesting another verification email.`);
+    return;
+  }
   if (firebaseAuth && firebaseAuth.currentUser) {
     await sendEmailVerification(firebaseAuth.currentUser);
+    lastVerificationResendAt = Date.now();
   }
 }
 
@@ -285,9 +307,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   initTheme();
   loadSettings().then(() => {
-    loadData().then(() => {
+    loadData().then(async () => {
       populateFilterOptions();
       setupEventListeners();
+      // Must resolve before the first renderApp() call — otherwise the page
+      // paints as logged-out for a moment (or permanently, if renderApp()
+      // isn't called again) even on a refresh where Firebase is still
+      // actually signed in.
+      const currentFirebaseUser = await waitForInitialFirebaseUser();
+      restoreSessionFromFirebaseUser(currentFirebaseUser);
+      await loadVolunteersFromCloud(true);
       renderApp();
       initBackgroundAnimation();
       // Perf: this crawl re-fetches GitHub/LeetCode stats for the entire
@@ -552,6 +581,49 @@ async function deleteCertificationFromCloud(certId) {
   } catch (err) {
     console.error('Could not delete certification from the cloud database.', err);
     showToast('Unable to delete this certification. Check your connection and try again.');
+    return false;
+  }
+}
+
+// --- Volunteers: same Firestore-first pattern as courses/certifications. ---
+let volunteersLastFetchedAt = 0;
+
+async function loadVolunteersFromCloud(force = false) {
+  if (!firestoreDb) { state.volunteers = getVolunteers() || []; return; }
+  if (!force && Date.now() - volunteersLastFetchedAt < CLOUD_DATA_FRESH_MS) return;
+  try {
+    const snap = await getDocs(collection(firestoreDb, VOLUNTEERS_COLLECTION));
+    const vols = [];
+    snap.forEach((docSnap) => vols.push({ id: docSnap.id, ...docSnap.data() }));
+    state.volunteers = vols;
+    saveVolunteers(vols); // refresh the local offline cache to match the cloud
+    volunteersLastFetchedAt = Date.now();
+  } catch (err) {
+    console.warn('Could not load volunteers from the cloud database, using last local cache.', err);
+    state.volunteers = getVolunteers() || [];
+  }
+}
+
+async function saveVolunteerToCloud(vol) {
+  if (!firestoreDb) return false;
+  try {
+    await setDoc(doc(firestoreDb, VOLUNTEERS_COLLECTION, vol.id), vol);
+    return true;
+  } catch (err) {
+    console.error('Could not save volunteer to the cloud database.', err);
+    showToast('Saved locally, but could not sync this volunteer online. Check your connection.');
+    return false;
+  }
+}
+
+async function deleteVolunteerFromCloud(volId) {
+  if (!firestoreDb) return false;
+  try {
+    await deleteDoc(doc(firestoreDb, VOLUNTEERS_COLLECTION, volId));
+    return true;
+  } catch (err) {
+    console.error('Could not delete volunteer from the cloud database.', err);
+    showToast('Removed locally, but could not sync the removal online. Check your connection.');
     return false;
   }
 }
@@ -1066,6 +1138,7 @@ function switchTab(tabId) {
     renderLeaderboard();
   } else if (tabId === 'view-volunteers') {
     renderVolunteersList();
+    loadVolunteersFromCloud().then(renderVolunteersList);
   } else if (tabId === 'view-departments') {
     renderDepartmentList();
   } else if (tabId === 'view-profile') {
@@ -1914,6 +1987,57 @@ function handleLogout() {
   state.loggedInUser = null;
   switchViewMode('member');
   renderApp();
+  if (firebaseAuth) firebaseSignOutFn(firebaseAuth).catch(() => {});
+}
+
+// ---- Session restore on page load/refresh ----
+// Firebase itself already keeps the user signed in across a refresh (it
+// persists to IndexedDB) — but state.loggedInUser is a plain in-memory JS
+// variable that resets to null every time this script re-runs. Without
+// this, Firebase silently stays signed in while the UI acts fully logged
+// out after every refresh: the homepage shows, the login button reappears,
+// and the admin/student dashboard is gone until signing in again. This
+// waits for Firebase's one-time "here's who's currently signed in" report
+// and rebuilds state.loggedInUser from it, using the exact same
+// admin/student matching rules as a normal sign-in.
+function waitForInitialFirebaseUser() {
+  return new Promise((resolve) => {
+    if (!firebaseAuth) { resolve(null); return; }
+    const unsubscribe = onAuthStateChanged(firebaseAuth, (user) => {
+      unsubscribe();
+      resolve(user);
+    }, () => resolve(null));
+  });
+}
+
+function restoreSessionFromFirebaseUser(user) {
+  if (!user || state.loggedInUser) return;
+
+  const email = (user.email || '').toLowerCase();
+  const isAdminEmail = email === 'cse.developerclub@gmail.com';
+
+  // Same verified-email gate as a normal sign-in — an unverified student
+  // shouldn't get restored into a logged-in session just because Firebase
+  // itself is still holding the session open.
+  if (!isAdminEmail && !user.emailVerified) return;
+
+  if (isAdminEmail) {
+    const matchedAdmin = state.students.find(s => s.id === 'admin') || {
+      id: 'admin', name: 'Admin', roll: 'ADMIN_CSE', dept: 'CSE', year: '4th Year',
+      role: 'admin', email, phone: '+91 94420 12345',
+      about: 'Al-Ameen Engineering College Developer Club Admin.'
+    };
+    state.loggedInUser = { ...matchedAdmin, role: 'admin' };
+    return;
+  }
+
+  const matchedStudent = state.students.find(s => s.email && s.email.toLowerCase() === email);
+  if (matchedStudent) {
+    state.loggedInUser = { ...matchedStudent, role: 'student' };
+  }
+  // If no matching profile is found, we leave state.loggedInUser as null —
+  // same "signed in, but no profile" situation the manual sign-in flow
+  // already handles by prompting for a roll number.
 }
 
 function handleProfilePhotoUpload(e) {
@@ -3215,6 +3339,7 @@ function handleAddVolunteer(e) {
 
   state.volunteers.push(newVol);
   saveCurrentState();
+  saveVolunteerToCloud(newVol); // sync so every other user/device sees this volunteer
 
   const addNameInput = document.getElementById('volunteer-add-name');
   const addRoleInput = document.getElementById('volunteer-add-role');
@@ -3232,6 +3357,7 @@ async function deleteVolunteer(volId) {
 
   state.volunteers = state.volunteers.filter(v => v.id !== volId);
   saveCurrentState();
+  deleteVolunteerFromCloud(volId); // sync the removal to every other user/device
   renderVolunteersList();
 }
 
@@ -3260,7 +3386,7 @@ function renderVolunteersList() {
     const matchedStudent = state.students.find(s => s && s.name && v.name && s.name.toLowerCase() === v.name.toLowerCase());
     const photoUrl = matchedStudent && matchedStudent.photo ? matchedStudent.photo : '';
     const avatarHtml = photoUrl 
-      ? `<img src="${photoUrl}" loading="lazy" style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 1.5px solid var(--primary-blue-light);" alt="Avatar">`
+      ? `<img src="${photoUrl}" loading="lazy" onerror="this.onerror=null;this.src='logo_club.png';" style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 1.5px solid var(--primary-blue-light);" alt="Avatar">`
       : `<div style="width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--primary-blue), var(--accent-orange)); color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.7rem; flex-shrink: 0;">${initials}</div>`;
     const dispVolName = v.name;
     tdName.innerHTML = `
@@ -3812,6 +3938,9 @@ function renderApp() {
     document.getElementById('header-user-name').textContent = state.loggedInUser.name;
     const headerAvatar = document.getElementById('header-user-avatar');
     if (headerAvatar) {
+      // onerror fallback: a broken/unreachable saved photo URL should quietly
+      // fall back to the club logo instead of showing a cracked-image icon.
+      headerAvatar.onerror = function() { this.onerror = null; this.src = 'logo_club.png'; };
       headerAvatar.src = state.loggedInUser.photo || 'logo_club.png';
     }
     document.getElementById('tab-profile-trigger').textContent = 'My Profile';
@@ -3938,6 +4067,7 @@ function renderDirectoryList() {
             if (await window.showCustomConfirm('Remove Volunteer', `Remove ${s.name} from the volunteers list?`)) {
               state.volunteers = state.volunteers.filter(v => v.id !== currentVol.id);
               saveCurrentState();
+              deleteVolunteerFromCloud(currentVol.id); // sync the removal to every other user/device
               renderDirectoryList();
               renderVolunteersList();
               showToast(`⭐ Removed ${s.name} from Volunteers.`);
@@ -4273,6 +4403,7 @@ function renderProfileView() {
 
   const photoImg = document.getElementById('profile-photo-img');
   if (photoImg) {
+    photoImg.onerror = function() { this.onerror = null; this.src = 'logo_club.png'; };
     photoImg.src = state.loggedInUser.photo || 'logo_club.png';
   }
 
@@ -4602,6 +4733,7 @@ window.approveStudentAsVolunteer = async function(studentId) {
 
   state.volunteers.push(newVol);
   saveCurrentState();
+  saveVolunteerToCloud(newVol); // sync so every other user/device sees this volunteer
   
   alert(`Successfully approved ${student.name} as a Volunteer!`);
   renderVolunteersList();
@@ -4615,6 +4747,7 @@ window.editVolunteerRole = async function(volId) {
   if (newRole !== null) {
     vol.role = newRole.trim() || 'Volunteer';
     saveCurrentState();
+    saveVolunteerToCloud(vol); // sync the edit to every other user/device
     renderVolunteersList();
     showToast(`⭐ Volunteer position updated successfully!`);
   }
