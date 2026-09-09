@@ -21,6 +21,15 @@ import {
   YEARS 
 } from './mockData.js';
 
+// Vite content-hashes every built asset filename (e.g. logo_club.B3x1kP.png)
+// so a CDN can cache it forever. A plain string like 'logo_club.png' in JS
+// is invisible to that process — it only rewrites references it can see
+// statically (like <img src="..."> in index.html or a real import like this
+// one) — so any src set from a bare JS string 404s in the built site even
+// though it works fine under `vite dev`. This import gives us the correct,
+// always-current hashed URL to use everywhere in this file instead.
+import logoClubUrl from './logo_club.png';
+
 import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
 import {
   getAuth,
@@ -154,6 +163,17 @@ const CERTIFICATIONS_COLLECTION = 'certifications';
 // changes were invisible to anyone else (or the admin themself on a
 // different device/browser).
 const VOLUNTEERS_COLLECTION = 'volunteers';
+// Every registered student must show up in the Admin Dashboard/directory,
+// and every poll must be visible to every user — same reasoning as
+// volunteers/courses above. Unlike those, students and polls are edited
+// from many different places throughout this file (registration, admin
+// edits, CV approval, stat refreshes, poll create/vote/close/delete), so
+// rather than adding a cloud-sync call at every one of those sites
+// individually (easy to miss one and cause drift), the sync is centralized
+// once inside saveCurrentState() below, which every one of those call
+// sites already calls.
+const STUDENTS_COLLECTION = 'students';
+const POLLS_COLLECTION = 'polls';
 
 // Creates a real Firebase account and emails a verification link.
 // Never stores the password anywhere in our own data.
@@ -175,7 +195,18 @@ async function firebaseSignUp(email, password) {
   }
   try {
     const cred = await createUserWithEmailAndPassword(firebaseAuth, email, password);
-    await sendEmailVerification(cred.user);
+    // Separate try/catch: account creation succeeding is what actually
+    // matters for the signup flow. If only the verification email fails to
+    // send (e.g. Firebase's own rate limit from repeated testing), the
+    // account still exists — reporting the whole signup as failed here
+    // would send the person back to a blank-looking form while a real
+    // account silently sits there, breaking their next attempt with
+    // "email already in use" for reasons they never saw.
+    try {
+      await sendEmailVerification(cred.user);
+    } catch (verifyErr) {
+      console.warn('Account created, but the verification email failed to send:', verifyErr);
+    }
     return { success: true, user: cred.user };
   } catch (err) {
     return { success: false, error: friendlyFirebaseError(err) };
@@ -314,9 +345,15 @@ document.addEventListener('DOMContentLoaded', () => {
       // paints as logged-out for a moment (or permanently, if renderApp()
       // isn't called again) even on a refresh where Firebase is still
       // actually signed in.
+      // Load the shared roster from Firestore before restoring the session,
+      // since restoreSessionFromFirebaseUser() needs an up-to-date
+      // state.students to correctly match the signed-in Firebase user to
+      // their profile.
+      await loadStudentsFromCloud(true);
+      await loadVolunteersFromCloud(true);
+      await loadPollsFromCloud(true);
       const currentFirebaseUser = await waitForInitialFirebaseUser();
       restoreSessionFromFirebaseUser(currentFirebaseUser);
-      await loadVolunteersFromCloud(true);
       renderApp();
       initBackgroundAnimation();
       // Perf: this crawl re-fetches GitHub/LeetCode stats for the entire
@@ -628,6 +665,65 @@ async function deleteVolunteerFromCloud(volId) {
   }
 }
 
+// --- Students & Polls: centralized sync (see comment on the constants
+// above for why this is one function instead of per-call-site syncing). ---
+let studentsLastFetchedAt = 0;
+let pollsLastFetchedAt = 0;
+
+async function loadStudentsFromCloud(force = false) {
+  if (!firestoreDb) { state.students = getStudents() || []; return; }
+  if (!force && Date.now() - studentsLastFetchedAt < CLOUD_DATA_FRESH_MS) return;
+  try {
+    const snap = await getDocs(collection(firestoreDb, STUDENTS_COLLECTION));
+    const students = [];
+    snap.forEach((docSnap) => students.push({ id: docSnap.id, ...docSnap.data() }));
+    if (students.length > 0) {
+      state.students = students;
+      saveStudents(students); // refresh local offline cache to match the cloud
+    }
+    studentsLastFetchedAt = Date.now();
+  } catch (err) {
+    console.warn('Could not load students from the cloud database, using last local cache.', err);
+    state.students = getStudents() || [];
+  }
+}
+
+async function loadPollsFromCloud(force = false) {
+  if (!firestoreDb) { state.polls = getPolls() || []; return; }
+  if (!force && Date.now() - pollsLastFetchedAt < CLOUD_DATA_FRESH_MS) return;
+  try {
+    const snap = await getDocs(collection(firestoreDb, POLLS_COLLECTION));
+    const polls = [];
+    snap.forEach((docSnap) => polls.push({ id: docSnap.id, ...docSnap.data() }));
+    state.polls = polls;
+    savePolls(polls);
+    pollsLastFetchedAt = Date.now();
+  } catch (err) {
+    console.warn('Could not load polls from the cloud database, using last local cache.', err);
+    state.polls = getPolls() || [];
+  }
+}
+
+// Fire-and-forget: pushes the current in-memory students and polls arrays
+// up to Firestore. Called from saveCurrentState() so every existing call
+// site that already saves state automatically stays in sync online too,
+// without needing to be touched individually. Not awaited by callers —
+// the local save (already done by the time this runs) is what keeps the
+// UI responsive; this just catches the online copy up shortly after.
+async function syncStudentsAndPollsToCloud() {
+  if (!firestoreDb) return;
+  try {
+    await Promise.all(state.students.map(s => setDoc(doc(firestoreDb, STUDENTS_COLLECTION, s.id), s)));
+  } catch (err) {
+    console.error('Could not sync students to the cloud database.', err);
+  }
+  try {
+    await Promise.all(state.polls.map(p => setDoc(doc(firestoreDb, POLLS_COLLECTION, p.id), p)));
+  } catch (err) {
+    console.error('Could not sync polls to the cloud database.', err);
+  }
+}
+
 // Points (GitHub Contributions * 1 + LeetCode solved * 10)
 // Active/inactive for both platforms comes only from real fetched
 // timestamps (githubLastActiveDate / leetcodeLastActiveDate). No date is
@@ -713,6 +809,7 @@ function saveCurrentState() {
     saveVolunteers(state.volunteers);
     savePolls(state.polls);
     saveCourses(state.courses);
+    syncStudentsAndPollsToCloud(); // push to Firestore too, not just localStorage
   }
 }
 
@@ -1134,18 +1231,25 @@ function switchTab(tabId) {
     renderDirectoryList();
     setTimeout(renderCharts, 100);
     loadCertificationsFromCloud().then(renderAdminCertificationsList);
+    loadStudentsFromCloud().then(() => {
+      renderKPIs();
+      renderDirectoryList();
+    });
   } else if (tabId === 'view-leaderboard') {
     renderLeaderboard();
+    loadStudentsFromCloud().then(renderLeaderboard);
   } else if (tabId === 'view-volunteers') {
     renderVolunteersList();
     loadVolunteersFromCloud().then(renderVolunteersList);
   } else if (tabId === 'view-departments') {
     renderDepartmentList();
+    loadStudentsFromCloud().then(renderDepartmentList);
   } else if (tabId === 'view-profile') {
     renderProfileView();
   } else if (tabId === 'view-announcements') {
     renderAnnouncementsList();
     document.getElementById('notif-badge-count').classList.add('d-none');
+    loadPollsFromCloud().then(renderAnnouncementsList);
   } else if (tabId === 'view-courses') {
     // Render immediately with whatever's cached so the tab isn't blank, then
     // requirement: always pull the latest courses from the shared database
@@ -3386,7 +3490,7 @@ function renderVolunteersList() {
     const matchedStudent = state.students.find(s => s && s.name && v.name && s.name.toLowerCase() === v.name.toLowerCase());
     const photoUrl = matchedStudent && matchedStudent.photo ? matchedStudent.photo : '';
     const avatarHtml = photoUrl 
-      ? `<img src="${photoUrl}" loading="lazy" onerror="this.onerror=null;this.src='logo_club.png';" style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 1.5px solid var(--primary-blue-light);" alt="Avatar">`
+      ? `<img src="${photoUrl}" loading="lazy" onerror="this.onerror=null;this.src='${logoClubUrl}';" style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 1.5px solid var(--primary-blue-light);" alt="Avatar">`
       : `<div style="width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--primary-blue), var(--accent-orange)); color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.7rem; flex-shrink: 0;">${initials}</div>`;
     const dispVolName = v.name;
     tdName.innerHTML = `
@@ -3945,8 +4049,8 @@ function renderApp() {
       if (headerAvatar) {
         // onerror fallback: a broken/unreachable saved photo URL should quietly
         // fall back to the club logo instead of showing a cracked-image icon.
-        headerAvatar.onerror = function() { this.onerror = null; this.src = 'logo_club.png'; };
-        headerAvatar.src = state.loggedInUser.photo || 'logo_club.png';
+        headerAvatar.onerror = function() { this.onerror = null; this.src = logoClubUrl; };
+        headerAvatar.src = state.loggedInUser.photo || logoClubUrl;
       }
       document.getElementById('tab-profile-trigger').textContent = 'My Profile';
     } else {
@@ -4412,8 +4516,8 @@ function renderProfileView() {
 
   const photoImg = document.getElementById('profile-photo-img');
   if (photoImg) {
-    photoImg.onerror = function() { this.onerror = null; this.src = 'logo_club.png'; };
-    photoImg.src = state.loggedInUser.photo || 'logo_club.png';
+    photoImg.onerror = function() { this.onerror = null; this.src = logoClubUrl; };
+    photoImg.src = state.loggedInUser.photo || logoClubUrl;
   }
 
   const profileCardTitle = document.querySelector('#profile-auth-container h3');
@@ -5275,7 +5379,7 @@ function sendBrowserNotification(title, body) {
   try {
     new Notification(`📢 ${title}`, {
       body: body && body.length > 120 ? body.slice(0, 117) + '...' : (body || ''),
-      icon: 'logo_club.png'
+      icon: logoClubUrl
     });
   } catch (err) {
     console.warn('Browser notification failed to show:', err);
