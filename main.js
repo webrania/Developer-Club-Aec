@@ -154,7 +154,6 @@ const CERTIFICATIONS_COLLECTION = 'certifications';
 // changes were invisible to anyone else (or the admin themself on a
 // different device/browser).
 const VOLUNTEERS_COLLECTION = 'volunteers';
-const STUDENTS_COLLECTION = 'students';
 
 // Creates a real Firebase account and emails a verification link.
 // Never stores the password anywhere in our own data.
@@ -307,31 +306,28 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   initTheme();
-
-  // Instant Session Restore from local cache on reload to avoid auto-logout flash
-  try {
-    const cachedUser = JSON.parse(safeGetItem('alameen_logged_in_user'));
-    if (cachedUser) {
-      state.loggedInUser = cachedUser;
-    }
-  } catch (err) {}
-
-  // Initialize background ambient particle animation IMMEDIATELY on boot
-  // so it doesn't load late or wait for network calls
-  initBackgroundAnimation();
-
   loadSettings().then(() => {
     loadData().then(async () => {
       populateFilterOptions();
       setupEventListeners();
-      
+      // Must resolve before the first renderApp() call — otherwise the page
+      // paints as logged-out for a moment (or permanently, if renderApp()
+      // isn't called again) even on a refresh where Firebase is still
+      // actually signed in.
       const currentFirebaseUser = await waitForInitialFirebaseUser();
       restoreSessionFromFirebaseUser(currentFirebaseUser);
-      
-      await loadStudentsFromCloud(true);
       await loadVolunteersFromCloud(true);
       renderApp();
-      
+      initBackgroundAnimation();
+      // Perf: this crawl re-fetches GitHub/LeetCode stats for the entire
+      // student roster. Running it from every open browser (student or
+      // admin) multiplies external API calls by however many people have
+      // the site open — with 200+ concurrent users that's tens of
+      // thousands of requests a minute for data that barely changes
+      // minute-to-minute. Only the admin's own session needs a background
+      // refresh; a student's own numbers already get pulled when they sign
+      // up or edit their profile. Admin can also force an immediate
+      // re-sync any time via the existing "Re-sync All Now" button.
       if (state.loggedInUser && state.loggedInUser.role === 'admin') {
         startAutomaticRealTimeCrawler();
       }
@@ -434,10 +430,19 @@ async function loadData() {
     fallbackToMock();
   }
 
-  // Fetch Firestore shared collections in parallel
-  loadStudentsFromCloud(true).then(recalculateScores);
-  loadVolunteersFromCloud(true).then(renderVolunteersList);
-
+  // Perf: courses and certifications live in Firestore. This used to
+  // `await` both, one after the other, before populateFilterOptions(),
+  // setupEventListeners(), renderApp() or initBackgroundAnimation() ran —
+  // meaning on a slow/mobile connection, every button and the background
+  // animation stayed dead for however long two sequential network
+  // round-trips took. Neither is needed for the initial paint: the About
+  // tab, KPIs, and recalculateScores() never read them, and
+  // fallbackToMock() above already filled state.courses from the local
+  // cache so the Courses tab isn't even empty in the meantime. Every
+  // course/certification view also already re-fetches fresh data itself
+  // the instant it's opened (see switchTab), so there's no need to block
+  // boot on these — fire them in parallel and let them resolve whenever
+  // they resolve.
   loadCoursesFromCloud().then(() => {
     if (state.currentTab === 'view-courses') {
       renderCoursesBrowse();
@@ -456,6 +461,15 @@ async function loadData() {
     state.followingList = [];
   }
   state.polls = state.polls || [];
+
+  // One-time-safe cleanup: strip any leftover demo/seed records from a
+  // browser that cached them before the hardcoded sample roster was removed.
+  // Real signups always get an id like `student_<timestamp>` and real
+  // volunteers are added through the admin form with their own generated
+  // ids, so this pattern can never match a genuine account — safe to leave
+  // running permanently rather than gating it behind a one-time flag.
+  state.students = (state.students || []).filter(s => s && !/^stud_\d+$/.test(s.id));
+  state.volunteers = (state.volunteers || []).filter(v => v && !/^vol_\d+$/.test(v.id) && v.id !== 'vol_admin');
 
   if (state.loggedInUser && state.loggedInUser.id === 'admin') {
     state.loggedInUser.name = 'Admin';
@@ -567,57 +581,6 @@ async function deleteCertificationFromCloud(certId) {
   } catch (err) {
     console.error('Could not delete certification from the cloud database.', err);
     showToast('Unable to delete this certification. Check your connection and try again.');
-    return false;
-  }
-}
-
-// --- Students Firestore Cloud Sync ---
-let studentsLastFetchedAt = 0;
-
-async function loadStudentsFromCloud(force = false) {
-  if (!firestoreDb) { state.students = getStudents() || []; return; }
-  if (!force && Date.now() - studentsLastFetchedAt < CLOUD_DATA_FRESH_MS) return;
-  try {
-    const snap = await getDocs(collection(firestoreDb, STUDENTS_COLLECTION));
-    const studs = [];
-    snap.forEach((docSnap) => studs.push({ id: docSnap.id, ...docSnap.data() }));
-    if (studs.length > 0) {
-      state.students = studs;
-      saveStudents(studs);
-    } else {
-      const localStuds = getStudents() || [];
-      if (localStuds.length > 0) {
-        state.students = localStuds;
-        for (const s of localStuds) {
-          if (s && s.id) await setDoc(doc(firestoreDb, STUDENTS_COLLECTION, s.id), s).catch(() => {});
-        }
-      }
-    }
-    studentsLastFetchedAt = Date.now();
-  } catch (err) {
-    console.warn('Could not load students from cloud database, using local cache.', err);
-    state.students = getStudents() || [];
-  }
-}
-
-async function saveStudentToCloud(studentDoc) {
-  if (!firestoreDb || !studentDoc || !studentDoc.id) return false;
-  try {
-    await setDoc(doc(firestoreDb, STUDENTS_COLLECTION, studentDoc.id), studentDoc);
-    return true;
-  } catch (err) {
-    console.error('Could not save student to cloud database.', err);
-    return false;
-  }
-}
-
-async function deleteStudentFromCloud(studentId) {
-  if (!firestoreDb || !studentId) return false;
-  try {
-    await deleteDoc(doc(firestoreDb, STUDENTS_COLLECTION, studentId));
-    return true;
-  } catch (err) {
-    console.error('Could not delete student from cloud database.', err);
     return false;
   }
 }
@@ -737,13 +700,8 @@ function recalculateScores() {
 function saveCurrentState() {
   recalculateScores();
   
-  // Local flags sync & active session persistence
+  // Local flags sync
   safeSetItem('alameen_following_list', JSON.stringify(state.followingList || []));
-  if (state.loggedInUser) {
-    safeSetItem('alameen_logged_in_user', JSON.stringify(state.loggedInUser));
-  } else {
-    safeRemoveItem('alameen_logged_in_user');
-  }
 
   if (state.dbMode === 'supabase' && state.supabaseClient) {
     syncToSupabase();
@@ -755,12 +713,6 @@ function saveCurrentState() {
     saveVolunteers(state.volunteers);
     savePolls(state.polls);
     saveCourses(state.courses);
-
-    if (firestoreDb && state.students && state.students.length > 0) {
-      state.students.forEach(s => {
-        if (s && s.id) saveStudentToCloud(s);
-      });
-    }
   }
 }
 
@@ -1163,16 +1115,11 @@ function switchTab(tabId) {
 
   state.currentTab = tabId;
   
-  // Close mobile navigation drawer if open
-  const navTabsContainer = document.getElementById('desktop-tabs');
-  const drawerOverlay = document.getElementById('mobile-drawer-overlay');
-  if (navTabsContainer) navTabsContainer.classList.remove('active');
-  if (drawerOverlay) drawerOverlay.classList.remove('active');
-
-  // Reset page scroll position so small screens don't get stuck in white space
-  window.scrollTo({ top: 0, behavior: 'instant' });
-
   document.querySelectorAll('#desktop-tabs .tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-target') === tabId);
+  });
+
+  document.querySelectorAll('#mobile-navigation .mobile-nav-item').forEach(btn => {
     btn.classList.toggle('active', btn.getAttribute('data-target') === tabId);
   });
 
@@ -1869,8 +1816,6 @@ function handleSignUpSubmit(e) {
         state.students.push(newStudent);
         state.loggedInUser = { ...newStudent, role: 'student' };
         saveCurrentState();
-        saveStudentToCloud(newStudent);
-        closeModal('modal-auth');
         renderApp();
         showToast(`Account created. Check ${email} for a verification link.`);
       })();
@@ -2046,6 +1991,15 @@ function handleLogout() {
 }
 
 // ---- Session restore on page load/refresh ----
+// Firebase itself already keeps the user signed in across a refresh (it
+// persists to IndexedDB) — but state.loggedInUser is a plain in-memory JS
+// variable that resets to null every time this script re-runs. Without
+// this, Firebase silently stays signed in while the UI acts fully logged
+// out after every refresh: the homepage shows, the login button reappears,
+// and the admin/student dashboard is gone until signing in again. This
+// waits for Firebase's one-time "here's who's currently signed in" report
+// and rebuilds state.loggedInUser from it, using the exact same
+// admin/student matching rules as a normal sign-in.
 function waitForInitialFirebaseUser() {
   return new Promise((resolve) => {
     if (!firebaseAuth) { resolve(null); return; }
@@ -2057,26 +2011,15 @@ function waitForInitialFirebaseUser() {
 }
 
 function restoreSessionFromFirebaseUser(user) {
-  if (!user) {
-    const cachedUser = safeGetItem('alameen_logged_in_user');
-    if (cachedUser) {
-      try {
-        state.loggedInUser = JSON.parse(cachedUser);
-        return;
-      } catch (e) {}
-    }
-    state.loggedInUser = null;
-    return;
-  }
+  if (!user || state.loggedInUser) return;
 
   const email = (user.email || '').toLowerCase();
   const isAdminEmail = email === 'cse.developerclub@gmail.com';
 
-  if (!isAdminEmail && !user.emailVerified) {
-    state.loggedInUser = null;
-    safeRemoveItem('alameen_logged_in_user');
-    return;
-  }
+  // Same verified-email gate as a normal sign-in — an unverified student
+  // shouldn't get restored into a logged-in session just because Firebase
+  // itself is still holding the session open.
+  if (!isAdminEmail && !user.emailVerified) return;
 
   if (isAdminEmail) {
     const matchedAdmin = state.students.find(s => s.id === 'admin') || {
@@ -2085,22 +2028,16 @@ function restoreSessionFromFirebaseUser(user) {
       about: 'Al-Ameen Engineering College Developer Club Admin.'
     };
     state.loggedInUser = { ...matchedAdmin, role: 'admin' };
-    safeSetItem('alameen_logged_in_user', JSON.stringify(state.loggedInUser));
     return;
   }
 
   const matchedStudent = state.students.find(s => s.email && s.email.toLowerCase() === email);
   if (matchedStudent) {
     state.loggedInUser = { ...matchedStudent, role: 'student' };
-    safeSetItem('alameen_logged_in_user', JSON.stringify(state.loggedInUser));
-  } else if (!state.loggedInUser) {
-    try {
-      const cached = JSON.parse(safeGetItem('alameen_logged_in_user'));
-      if (cached && cached.email && cached.email.toLowerCase() === email) {
-        state.loggedInUser = cached;
-      }
-    } catch(e) {}
   }
+  // If no matching profile is found, we leave state.loggedInUser as null —
+  // same "signed in, but no profile" situation the manual sign-in flow
+  // already handles by prompting for a roll number.
 }
 
 function handleProfilePhotoUpload(e) {
@@ -3391,7 +3328,7 @@ function handleAddVolunteer(e) {
   const whatsapp = phone.replace(/[^0-9]/g, '');
 
   const newVol = {
-    id: `volunteer_${Date.now()}`,
+    id: `vol_${Date.now()}`,
     name,
     role,
     dept,
@@ -3989,44 +3926,53 @@ function renderCharts() {
 }
 
 function renderApp() {
-  const triggerBtn = document.getElementById('btn-login-trigger');
-  const mobileTriggerBtn = document.getElementById('btn-login-trigger-mobile');
-  const profileSummary = document.getElementById('user-profile-summary');
-  
-  if (state.loggedInUser) {
-    triggerBtn.classList.add('d-none');
-    if (mobileTriggerBtn) mobileTriggerBtn.classList.add('d-none');
-    profileSummary.classList.remove('d-none');
-    profileSummary.style.display = 'flex';
-    document.getElementById('header-user-name').textContent = state.loggedInUser.name;
-    const headerAvatar = document.getElementById('header-user-avatar');
-    if (headerAvatar) {
-      // onerror fallback: a broken/unreachable saved photo URL should quietly
-      // fall back to the club logo instead of showing a cracked-image icon.
-      headerAvatar.onerror = function() { this.onerror = null; this.src = 'logo_club.png'; };
-      headerAvatar.src = state.loggedInUser.photo || 'logo_club.png';
-    }
-    document.getElementById('tab-profile-trigger').textContent = 'My Profile';
-  } else {
-    triggerBtn.classList.remove('d-none');
-    if (mobileTriggerBtn) mobileTriggerBtn.classList.remove('d-none');
-    profileSummary.classList.add('d-none');
-    profileSummary.style.display = 'none';
-  }
+  // Wrapped end-to-end: if anything in the middle of this function throws,
+  // the switchTab() call in the finally block still runs, so the page can
+  // never get stuck fully blank the way it did before the Firebase-init fix
+  // documented in CHANGES.md. Same principle, applied here too.
+  try {
+    const triggerBtn = document.getElementById('btn-login-trigger');
+    const mobileTriggerBtn = document.getElementById('btn-login-trigger-mobile');
+    const profileSummary = document.getElementById('user-profile-summary');
 
-  if (state.loggedInUser && state.loggedInUser.role === 'admin') {
-    if (state.viewMode !== 'admin') {
-      switchViewMode('admin');
+    if (state.loggedInUser) {
+      triggerBtn.classList.add('d-none');
+      if (mobileTriggerBtn) mobileTriggerBtn.classList.add('d-none');
+      profileSummary.classList.remove('d-none');
+      profileSummary.style.display = 'flex';
+      document.getElementById('header-user-name').textContent = state.loggedInUser.name;
+      const headerAvatar = document.getElementById('header-user-avatar');
+      if (headerAvatar) {
+        // onerror fallback: a broken/unreachable saved photo URL should quietly
+        // fall back to the club logo instead of showing a cracked-image icon.
+        headerAvatar.onerror = function() { this.onerror = null; this.src = 'logo_club.png'; };
+        headerAvatar.src = state.loggedInUser.photo || 'logo_club.png';
+      }
+      document.getElementById('tab-profile-trigger').textContent = 'My Profile';
+    } else {
+      triggerBtn.classList.remove('d-none');
+      if (mobileTriggerBtn) mobileTriggerBtn.classList.remove('d-none');
+      profileSummary.classList.add('d-none');
+      profileSummary.style.display = 'none';
     }
-  } else {
-    if (state.viewMode !== 'member') {
-      switchViewMode('member');
-    }
-  }
 
-  renderDepartmentList();
-  renderVolunteersList();
-  switchTab(state.currentTab);
+    if (state.loggedInUser && state.loggedInUser.role === 'admin') {
+      if (state.viewMode !== 'admin') {
+        switchViewMode('admin');
+      }
+    } else {
+      if (state.viewMode !== 'member') {
+        switchViewMode('member');
+      }
+    }
+
+    renderDepartmentList();
+    renderVolunteersList();
+  } catch (err) {
+    console.error('renderApp() hit an error partway through — content visibility is still being restored below.', err);
+  } finally {
+    switchTab(state.currentTab);
+  }
 }
 
 function renderKPIs() {
