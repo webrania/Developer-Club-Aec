@@ -1289,7 +1289,10 @@ function switchTab(tabId) {
     renderKPIs();
     renderDirectoryList();
     setTimeout(renderCharts, 100);
-    loadCertificationsFromCloud().then(renderAdminCertificationsList);
+    loadCertificationsFromCloud().then(() => {
+      renderAdminCertificationsList();
+      renderKPIs();
+    });
     loadStudentsFromCloud().then(() => {
       renderKPIs();
       renderDirectoryList();
@@ -2264,23 +2267,55 @@ function handleProfilePhotoUpload(e) {
     return;
   }
 
-  const reader = new FileReader();
-  reader.onload = function(evt) {
-    const base64Str = evt.target.result;
+  // Profile photos live on the same student record as CV status, poll
+  // votes, everything else — a single Firestore document. Firestore
+  // rejects any document over 1MB, and an un-resized phone photo (often
+  // 3-8MB raw, larger still once base64-encoded) blows past that easily.
+  // When that happens the ENTIRE student record silently fails to sync —
+  // not just the photo — which is why a CV update could vanish for a
+  // student whose profile photo was too large. Resizing/compressing every
+  // photo down to a small thumbnail here means this can't happen, instead
+  // of just rejecting large uploads and making the person guess why.
+  const img = new Image();
+  const objectUrl = URL.createObjectURL(file);
+  img.onload = function() {
+    URL.revokeObjectURL(objectUrl);
+    const maxDim = 300;
+    let { width, height } = img;
+    if (width > height && width > maxDim) {
+      height = Math.round(height * (maxDim / width));
+      width = maxDim;
+    } else if (height > maxDim) {
+      width = Math.round(width * (maxDim / height));
+      height = maxDim;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+    // JPEG at 0.7 quality keeps a 300px thumbnail comfortably under ~50KB
+    // in virtually every case — nowhere near Firestore's 1MB document cap
+    // even accounting for the rest of the student record around it.
+    const base64Str = canvas.toDataURL('image/jpeg', 0.7);
+
     const photoImg = document.getElementById('profile-photo-img');
     if (photoImg) photoImg.src = base64Str;
-    
+
     if (state.loggedInUser) {
       state.loggedInUser.photo = base64Str;
       const matched = state.students.find(s => s.id === state.loggedInUser.id);
       if (matched) matched.photo = base64Str;
-      
+
       saveCurrentState();
       renderApp();
       showToast("Profile photo updated.");
     }
   };
-  reader.readAsDataURL(file);
+  img.onerror = function() {
+    URL.revokeObjectURL(objectUrl);
+    alert("Could not read that image file. Try a different one.");
+  };
+  img.src = objectUrl;
 }
 
 function extractUsername(val, domain) {
@@ -4214,10 +4249,13 @@ function renderKPIs() {
   const total = studentsOnly.length;
   const active = studentsOnly.filter(s => s.active).length;
   const approvedCvs = studentsOnly.filter(s => s.cvStatus === 'Approved').length;
+  const totalCertifications = state.certifications.length;
 
   document.getElementById('kpi-total-members').textContent = total;
   document.getElementById('kpi-active-members').textContent = active;
   document.getElementById('kpi-approved-cvs').textContent = approvedCvs;
+  const certKpiEl = document.getElementById('kpi-total-certifications');
+  if (certKpiEl) certKpiEl.textContent = totalCertifications;
 }
 
 // Admin Registry directory
@@ -5347,8 +5385,13 @@ function readAttachmentPromise(fileInputId) {
       return;
     }
     const file = input.files[0];
-    if (file.size > 2 * 1024 * 1024) {
-      alert(`File "${file.name}" is too large. Maximum attachment size is 2 MB.`);
+    // Kept well under Firestore's 1MB-per-document hard limit — base64
+    // encoding adds roughly 33% overhead on top of the raw file size, and
+    // the attachment shares its document with the rest of the
+    // notification's fields. 2MB raw was comfortably over that limit,
+    // which silently failed the sync for the whole announcement.
+    if (file.size > 650 * 1024) {
+      alert(`File "${file.name}" is too large. Maximum attachment size is 650 KB, since this data is stored directly in the database (no separate file storage is set up).`);
       input.value = '';
       resolve(null);
       return;
