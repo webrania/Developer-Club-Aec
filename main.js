@@ -174,6 +174,11 @@ const VOLUNTEERS_COLLECTION = 'volunteers';
 // sites already calls.
 const STUDENTS_COLLECTION = 'students';
 const POLLS_COLLECTION = 'polls';
+// Same problem as students/polls/volunteers: admin broadcasts and pinned
+// notices only ever reached localStorage, so an admin's announcement was
+// invisible to every other user's browser — explaining "admin posted it
+// but the student never got it."
+const NOTIFICATIONS_COLLECTION = 'notifications';
 
 // Creates a real Firebase account and emails a verification link.
 // Never stores the password anywhere in our own data.
@@ -345,17 +350,34 @@ document.addEventListener('DOMContentLoaded', () => {
       // paints as logged-out for a moment (or permanently, if renderApp()
       // isn't called again) even on a refresh where Firebase is still
       // actually signed in.
-      // Load the shared roster from Firestore before restoring the session,
-      // since restoreSessionFromFirebaseUser() needs an up-to-date
-      // state.students to correctly match the signed-in Firebase user to
-      // their profile.
-      await loadStudentsFromCloud(true);
-      await loadVolunteersFromCloud(true);
-      await loadPollsFromCloud(true);
-      const currentFirebaseUser = await waitForInitialFirebaseUser();
-      restoreSessionFromFirebaseUser(currentFirebaseUser);
-      renderApp();
-      initBackgroundAnimation();
+      //
+      // Order matters here: waitForInitialFirebaseUser() must run BEFORE
+      // any Firestore read. Firestore's security rules check the SDK's
+      // *current* client-side auth state at request time — if a read fires
+      // before Firebase Auth has finished confirming who's signed in (which
+      // takes a moment after page load, even for an already-logged-in
+      // user), the request goes out looking unauthenticated and gets
+      // rejected with "Missing or insufficient permissions", even though
+      // the user really is logged in. Then restoreSessionFromFirebaseUser()
+      // needs state.students already loaded, so that comes after.
+      // The whole sequence is wrapped in try/catch/finally so a genuine
+      // failure anywhere in here (a network hiccup, anything) still can't
+      // prevent renderApp()/initBackgroundAnimation() from running and
+      // leaving the page blank.
+      try {
+        const currentFirebaseUser = await waitForInitialFirebaseUser();
+        await loadStudentsFromCloud(true);
+        await loadVolunteersFromCloud(true);
+        await loadPollsFromCloud(true);
+        await loadNotificationsFromCloud(true);
+        restoreSessionFromFirebaseUser(currentFirebaseUser);
+        updateAnnouncementsBadge();
+      } catch (err) {
+        console.error('Startup data load hit an error — showing the page with whatever loaded so far.', err);
+      } finally {
+        renderApp();
+        initBackgroundAnimation();
+      }
       // Perf: this crawl re-fetches GitHub/LeetCode stats for the entire
       // student roster. Running it from every open browser (student or
       // admin) multiplies external API calls by however many people have
@@ -704,12 +726,44 @@ async function loadPollsFromCloud(force = false) {
   }
 }
 
-// Fire-and-forget: pushes the current in-memory students and polls arrays
-// up to Firestore. Called from saveCurrentState() so every existing call
-// site that already saves state automatically stays in sync online too,
-// without needing to be touched individually. Not awaited by callers —
-// the local save (already done by the time this runs) is what keeps the
-// UI responsive; this just catches the online copy up shortly after.
+let notificationsLastFetchedAt = 0;
+
+// Compares every notification's timestamp against when this browser last
+// opened the Announcements tab, and shows/hides the tab's dot accordingly.
+// This is what makes the dot reflect announcements that arrived from
+// somewhere else (another admin's browser, synced in via Firestore) instead
+// of only ones created locally in this same session.
+function updateAnnouncementsBadge() {
+  const badge = document.getElementById('notif-badge-count');
+  if (!badge) return;
+  const lastSeen = Number(safeGetItem('alameen_last_seen_notif_ts') || 0);
+  const hasUnseen = state.notifications.some(n => new Date(n.timestamp).getTime() > lastSeen);
+  badge.classList.toggle('d-none', !hasUnseen);
+}
+
+async function loadNotificationsFromCloud(force = false) {
+  if (!firestoreDb) { state.notifications = getNotifications() || []; return; }
+  if (!force && Date.now() - notificationsLastFetchedAt < CLOUD_DATA_FRESH_MS) return;
+  try {
+    const snap = await getDocs(collection(firestoreDb, NOTIFICATIONS_COLLECTION));
+    const notifications = [];
+    snap.forEach((docSnap) => notifications.push({ id: docSnap.id, ...docSnap.data() }));
+    state.notifications = notifications;
+    saveNotifications(notifications);
+    notificationsLastFetchedAt = Date.now();
+  } catch (err) {
+    console.warn('Could not load announcements from the cloud database, using last local cache.', err);
+    state.notifications = getNotifications() || [];
+  }
+}
+
+// Fire-and-forget: pushes the current in-memory students, polls, and
+// notifications arrays up to Firestore. Called from saveCurrentState() so
+// every existing call site that already saves state automatically stays in
+// sync online too, without needing to be touched individually. Not awaited
+// by callers — the local save (already done by the time this runs) is what
+// keeps the UI responsive; this just catches the online copy up shortly
+// after.
 async function syncStudentsAndPollsToCloud() {
   if (!firestoreDb) return;
   try {
@@ -721,6 +775,11 @@ async function syncStudentsAndPollsToCloud() {
     await Promise.all(state.polls.map(p => setDoc(doc(firestoreDb, POLLS_COLLECTION, p.id), p)));
   } catch (err) {
     console.error('Could not sync polls to the cloud database.', err);
+  }
+  try {
+    await Promise.all(state.notifications.map(n => setDoc(doc(firestoreDb, NOTIFICATIONS_COLLECTION, n.id), n)));
+  } catch (err) {
+    console.error('Could not sync announcements to the cloud database.', err);
   }
 }
 
@@ -1248,8 +1307,16 @@ function switchTab(tabId) {
     renderProfileView();
   } else if (tabId === 'view-announcements') {
     renderAnnouncementsList();
+    // Opening this tab is what marks everything as read — record the
+    // current time so any notification from before now stops lighting the
+    // dot, even after a fresh page load pulls the same list back in again.
+    safeSetItem('alameen_last_seen_notif_ts', Date.now().toString());
     document.getElementById('notif-badge-count').classList.add('d-none');
     loadPollsFromCloud().then(renderAnnouncementsList);
+    loadNotificationsFromCloud().then(() => {
+      renderAnnouncementsList();
+      updateAnnouncementsBadge();
+    });
   } else if (tabId === 'view-courses') {
     // Render immediately with whatever's cached so the tab isn't blank, then
     // requirement: always pull the latest courses from the shared database
@@ -1949,7 +2016,12 @@ function handleSignUpSubmit(e) {
         }
         openModal('modal-auth');
         showAuthScreen('auth-step-signin');
-        showToast(`Account created! Check ${email} for a verification link, then sign in.`);
+        // Pre-fill the email so the only thing left to type is the
+        // password — no reason to make them retype what they just entered.
+        const signinEmailField = document.getElementById('auth-signin-email');
+        if (signinEmailField) signinEmailField.value = email;
+        showToast('Account created!');
+        alert(`Almost done!\n\n1. Open your email inbox (${email})\n2. Click the verification link we just sent\n3. Come back here and sign in with your password`);
       })();
     }, 800);
   })();
@@ -2008,7 +2080,10 @@ async function handleOtpSubmitInner(email, password, isNewSignup) {
     closeModal('modal-auth');
     openModal('modal-auth');
     showAuthScreen('auth-step-signin');
-    showToast(`Account created! Check ${email} for a verification link, then sign in.`);
+    const signinEmailField2 = document.getElementById('auth-signin-email');
+    if (signinEmailField2) signinEmailField2.value = email;
+    showToast('Account created!');
+    alert(`Almost done!\n\n1. Open your email inbox (${email})\n2. Click the verification link we just sent\n3. Come back here and sign in with your password`);
     return;
   }
 
