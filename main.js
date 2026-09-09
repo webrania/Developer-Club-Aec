@@ -1847,6 +1847,14 @@ function handleSignUpSubmit(e) {
     alert('This register roll number is already registered.');
     return;
   }
+  // Check for a duplicate email up front, before running the GitHub/LeetCode
+  // crawler animation — no reason to make someone wait through that only to
+  // find out at the very end (Firebase would reject it anyway with
+  // email-already-in-use, but catching it here is instant and clearer).
+  if (state.students.some(s => s.email && s.email.toLowerCase() === email.toLowerCase())) {
+    alert('That email is already registered. Try signing in instead.');
+    return;
+  }
 
   const crawler = document.getElementById('crawler-overlay');
   const status = document.getElementById('crawler-status-message');
@@ -1918,10 +1926,30 @@ function handleSignUpSubmit(e) {
         delete newStudent.password; // Firebase owns the password now, never store it ourselves
 
         state.students.push(newStudent);
-        state.loggedInUser = { ...newStudent, role: 'student' };
         saveCurrentState();
-        renderApp();
-        showToast(`Account created. Check ${email} for a verification link.`);
+        // saveCurrentState() fires the Firestore sync without awaiting it
+        // (that's normally fine — the local save already happened). But
+        // signing out immediately after, before that write actually reaches
+        // Firestore, can invalidate the auth context the write needs to
+        // pass the "request.auth != null" security rule — silently losing
+        // the new student from the cloud even though it saved locally.
+        // Awaiting it explicitly here, before signing out, closes that gap.
+        await syncStudentsAndPollsToCloud();
+
+        // createUserWithEmailAndPassword() auto-signs the new account in,
+        // but sign-in elsewhere in this app requires a verified email
+        // (see the emailVerified check in the sign-in flow) — logging them
+        // straight into a full session here, before verifying, would be
+        // inconsistent with that rule and just get reverted on the next
+        // refresh anyway. Signing back out and sending them to the sign-in
+        // screen instead makes "verify, then sign in" the one consistent
+        // path, matching what actually happens if they refresh.
+        if (firebaseAuth) {
+          try { await firebaseSignOutFn(firebaseAuth); } catch (e) { /* ignore */ }
+        }
+        openModal('modal-auth');
+        showAuthScreen('auth-step-signin');
+        showToast(`Account created! Check ${email} for a verification link, then sign in.`);
       })();
     }, 800);
   })();
@@ -1968,11 +1996,19 @@ async function handleOtpSubmitInner(email, password, isNewSignup) {
     delete newStudent.password; // Firebase owns the password now, never store it ourselves
 
     state.students.push(newStudent);
-    state.loggedInUser = { ...newStudent, role: 'student' };
     saveCurrentState();
+    await syncStudentsAndPollsToCloud(); // see comment on the main signup path — must finish before sign-out below
+
+    // Same consistency fix as the main signup path above: don't grant a
+    // logged-in session before the email is verified, since sign-in
+    // elsewhere requires it.
+    if (firebaseAuth) {
+      try { await firebaseSignOutFn(firebaseAuth); } catch (e) { /* ignore */ }
+    }
     closeModal('modal-auth');
-    renderApp();
-    showToast(`Account created. Check ${email} for a verification link.`);
+    openModal('modal-auth');
+    showAuthScreen('auth-step-signin');
+    showToast(`Account created! Check ${email} for a verification link, then sign in.`);
     return;
   }
 
@@ -2563,6 +2599,25 @@ async function handlePollSubmit(e) {
       postedBy: state.loggedInUser ? state.loggedInUser.name : 'Admin (CSE Dept)'
     };
     state.polls.unshift(newPoll);
+
+    // In-app notification, not just the browser push below — sendBrowserNotification()
+    // only reaches someone if they previously granted browser notification
+    // permission, which most people never do. This guarantees everyone sees
+    // it in the app's own notification feed regardless of that permission.
+    state.notifications.unshift({
+      id: `notif_${Date.now()}`,
+      title: 'New Poll: ' + question,
+      content: 'A new poll is open — vote now on the Announcements page.',
+      type: 'poll',
+      timestamp: new Date().toISOString(),
+      sender: state.loggedInUser ? state.loggedInUser.name : 'Admin (CSE Dept)',
+      isPinnedAd: false,
+      buttonLabel: null,
+      buttonUrl: null
+    });
+    const badge = document.getElementById('notif-badge-count');
+    if (badge) badge.classList.remove('d-none');
+
     alert('Poll posted to the Announcements page!');
     sendBrowserNotification('New Poll: ' + question, 'Vote now on the Announcements page.');
   }
