@@ -647,10 +647,24 @@
             <div class="detail-card" style="grid-column: 1 / -1;">
               <h3 style="margin-bottom: 0.5rem; color: var(--primary-blue); text-align: center;">Developer Club
                 Volunteers Committee</h3>
-              <p class="kpi-subtext" style="margin-bottom: 2rem; text-align: center;">The dedicated committee team
+              <p class="kpi-subtext" style="margin-bottom: 1.25rem; text-align: center;">The dedicated committee team
                 organizing developer bootcamps, upskilling runs, and coding contests.</p>
 
-              <!-- Volunteers rendered inside a clean Table layout -->
+              <!-- Search + filters -->
+              <div style="display: flex; flex-wrap: wrap; gap: 0.6rem; margin-bottom: 1.25rem;">
+                <input type="text" id="vol-search-input" class="form-control" placeholder="🔍 Search by name or roll number"
+                  style="flex: 1 1 220px;">
+                <select id="vol-filter-dept" class="form-control" style="flex: 1 1 140px;">
+                  <option value="">All Departments</option>
+                </select>
+                <select id="vol-filter-year" class="form-control" style="flex: 1 1 140px;">
+                  <option value="">All Years</option>
+                </select>
+              </div>
+
+              <!-- Volunteers rendered inside a clean Table layout on desktop;
+                   a swipeable horizontal carousel on small screens (see
+                   #volunteers-table-body mobile rules in style.css) -->
               <div class="table-responsive">
                 <table style="width: 100%;">
                   <thead>

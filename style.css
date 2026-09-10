@@ -1922,17 +1922,28 @@ footer {
   #volunteers-table-body td:nth-of-type(4)::before { content: "Contact" !important; }
   #volunteers-table-body td:nth-of-type(5)::before { content: "Actions" !important; }
 
-  /* Volunteers Committee: real profile-card layout instead of the generic
-     label/value stack every other table uses. Name+avatar is already
-     self-evident, so it gets no label and becomes the card's header row;
-     role becomes a colored badge under it; department is a quiet subtitle;
-     contact icons and the admin action get their own centered rows. This
-     overrides the generic rules above for this one table only. */
+  /* Volunteers Committee: horizontal swipeable card carousel on mobile,
+     since there are often too many volunteers to comfortably scroll through
+     as a vertical list on a small screen. Each row becomes one full-width
+     card; scroll-snap makes swiping land cleanly on one card at a time. */
   #volunteers-table-body td:nth-of-type(1)::before {
     content: "" !important;
   }
+  .table-responsive:has(#volunteers-table-body) {
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.5rem;
+  }
+  #volunteers-table-body {
+    display: flex !important;
+    gap: 0.85rem;
+  }
   #volunteers-table-body tr {
-    padding: 0.9rem 0.85rem !important;
+    display: block !important;
+    flex: 0 0 82%;
+    scroll-snap-align: center;
+    padding: 1rem !important;
     border-left: 3px solid var(--primary-blue) !important;
   }
   #volunteers-table-body td {

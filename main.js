@@ -179,6 +179,14 @@ const POLLS_COLLECTION = 'polls';
 // invisible to every other user's browser — explaining "admin posted it
 // but the student never got it."
 const NOTIFICATIONS_COLLECTION = 'notifications';
+// Departments are a small, flat list of names (not individually growing
+// records like students/polls), so instead of one Firestore doc per
+// department, the whole list lives in a single doc. Same underlying problem
+// as everything above though: without this, each browser only ever saw its
+// own local default list, making departments look like they were randomly
+// appearing/disappearing between devices.
+const CONFIG_COLLECTION = 'config';
+const DEPARTMENTS_DOC_ID = 'departments';
 
 // Creates a real Firebase account and emails a verification link.
 // Never stores the password anywhere in our own data.
@@ -370,6 +378,8 @@ document.addEventListener('DOMContentLoaded', () => {
         await loadVolunteersFromCloud(true);
         await loadPollsFromCloud(true);
         await loadNotificationsFromCloud(true);
+        await loadDepartmentsFromCloud(true);
+        populateFilterOptions(); // re-run now that departments may have just been refreshed from the cloud
         restoreSessionFromFirebaseUser(currentFirebaseUser);
         updateAnnouncementsBadge();
       } catch (err) {
@@ -727,6 +737,34 @@ async function loadPollsFromCloud(force = false) {
 }
 
 let notificationsLastFetchedAt = 0;
+let departmentsLastFetchedAt = 0;
+
+async function loadDepartmentsFromCloud(force = false) {
+  if (!firestoreDb) { state.departments = getDepartments() || []; return; }
+  if (!force && Date.now() - departmentsLastFetchedAt < CLOUD_DATA_FRESH_MS) return;
+  try {
+    const docSnap = await getDocs(collection(firestoreDb, CONFIG_COLLECTION));
+    let found = null;
+    docSnap.forEach((d) => { if (d.id === DEPARTMENTS_DOC_ID) found = d.data(); });
+    if (found && Array.isArray(found.list) && found.list.length > 0) {
+      state.departments = found.list;
+      saveDepartments(found.list);
+    }
+    departmentsLastFetchedAt = Date.now();
+  } catch (err) {
+    console.warn('Could not load departments from the cloud database, using last local cache.', err);
+    state.departments = getDepartments() || [];
+  }
+}
+
+async function saveDepartmentsToCloud() {
+  if (!firestoreDb) return;
+  try {
+    await setDoc(doc(firestoreDb, CONFIG_COLLECTION, DEPARTMENTS_DOC_ID), { list: state.departments });
+  } catch (err) {
+    console.error('Could not sync departments to the cloud database.', err);
+  }
+}
 
 // Compares every notification's timestamp against when this browser last
 // opened the Announcements tab, and shows/hides the tab's dot accordingly.
@@ -936,6 +974,26 @@ function populateFilterOptions() {
     leadDept.appendChild(opt3);
   });
 
+  const volDeptFilter = document.getElementById('vol-filter-dept');
+  const volYearFilter = document.getElementById('vol-filter-year');
+  if (volDeptFilter && volYearFilter) {
+    volDeptFilter.innerHTML = '<option value="">All Departments</option>';
+    volYearFilter.innerHTML = '<option value="">All Years</option>';
+    state.departments.forEach(dept => {
+      const opt = document.createElement('option');
+      opt.value = dept; opt.textContent = dept;
+      volDeptFilter.appendChild(opt);
+    });
+    YEARS.forEach(yr => {
+      const opt = document.createElement('option');
+      // Matches the "3rd CSE" style prefix stored on approved volunteers —
+      // just the leading ordinal word ("3rd"), not the full year string.
+      opt.value = yr.split(' ')[0];
+      opt.textContent = yr;
+      volYearFilter.appendChild(opt);
+    });
+  }
+
   YEARS.forEach(yr => {
     const opt1 = document.createElement('option');
     opt1.value = yr; opt1.textContent = yr;
@@ -1005,6 +1063,13 @@ function setupEventListeners() {
   document.getElementById('leaderboard-filter-time').addEventListener('change', renderLeaderboard);
   document.getElementById('leaderboard-filter-dept').addEventListener('change', renderLeaderboard);
   document.getElementById('leaderboard-filter-year').addEventListener('change', renderLeaderboard);
+
+  const volSearchEl = document.getElementById('vol-search-input');
+  const volDeptEl = document.getElementById('vol-filter-dept');
+  const volYearEl = document.getElementById('vol-filter-year');
+  if (volSearchEl) volSearchEl.addEventListener('input', renderVolunteersList);
+  if (volDeptEl) volDeptEl.addEventListener('change', renderVolunteersList);
+  if (volYearEl) volYearEl.addEventListener('change', renderVolunteersList);
 
 
 
@@ -1321,6 +1386,10 @@ function switchTab(tabId) {
   } else if (tabId === 'view-departments') {
     renderDepartmentList();
     loadStudentsFromCloud().then(renderDepartmentList);
+    loadDepartmentsFromCloud().then(() => {
+      populateFilterOptions();
+      renderDepartmentList();
+    });
   } else if (tabId === 'view-profile') {
     renderProfileView();
   } else if (tabId === 'view-announcements') {
@@ -3543,6 +3612,7 @@ function handleAddDepartment(e) {
 
   state.departments.push(name);
   saveCurrentState();
+  saveDepartmentsToCloud();
   
   input.value = '';
   populateFilterOptions();
@@ -3554,6 +3624,7 @@ async function deleteDepartment(deptName) {
 
   state.departments = state.departments.filter(d => d !== deptName);
   saveCurrentState();
+  saveDepartmentsToCloud();
   populateFilterOptions();
   renderDepartmentList();
 }
@@ -3660,7 +3731,28 @@ function renderVolunteersList() {
     actHeader.classList.add('d-none');
   }
 
-  const displayVols = state.volunteers.filter(v => v && v.name && v.id !== 'vol_admin' && v.name !== 'Admin' && v.name !== 'Club President' && v.name !== 'Club President Admin');
+  const searchInput = document.getElementById('vol-search-input');
+  const deptFilter = document.getElementById('vol-filter-dept');
+  const yearFilter = document.getElementById('vol-filter-year');
+  const searchTerm = (searchInput?.value || '').trim().toLowerCase();
+  const deptTerm = deptFilter?.value || '';
+  const yearTerm = yearFilter?.value || '';
+
+  const displayVols = state.volunteers
+    .filter(v => v && v.name && v.id !== 'vol_admin' && v.name !== 'Admin' && v.name !== 'Club President' && v.name !== 'Club President Admin')
+    .filter(v => {
+      if (!searchTerm) return true;
+      const matchedStudent = state.students.find(s => s && s.name && v.name && s.name.toLowerCase() === v.name.toLowerCase());
+      const roll = matchedStudent?.roll || '';
+      return v.name.toLowerCase().includes(searchTerm) || roll.toLowerCase().includes(searchTerm);
+    })
+    .filter(v => !deptTerm || (v.dept || '').includes(deptTerm))
+    // Year isn't always stored on a volunteer record on its own (only when
+    // approved from an existing student profile, as "3rd CSE" etc.) — this
+    // matches on that same text when present, and simply doesn't exclude
+    // volunteers added without a year prefix rather than hiding them
+    // incorrectly.
+    .filter(v => !yearTerm || (v.dept || '').includes(yearTerm) || !/\d/.test(v.dept || ''));
   displayVols.forEach(v => {
     const tr = document.createElement('tr');
     tr.style.textAlign = 'center';
