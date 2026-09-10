@@ -979,6 +979,21 @@ function setupEventListeners() {
     });
   });
 
+  // Emails are matched case-insensitively everywhere else in this file
+  // (sign-in, admin lookup, session restore), but the raw typed value is
+  // what actually gets stored on the student record and sent to Firebase
+  // Auth. Forcing it lowercase as-typed keeps the stored value consistent
+  // with every comparison already made against it, instead of relying on
+  // every future comparison remembering to call .toLowerCase() itself.
+  const signupEmailInput = document.getElementById('signup-email');
+  if (signupEmailInput) {
+    signupEmailInput.addEventListener('input', () => {
+      const cursorPos = signupEmailInput.selectionStart;
+      signupEmailInput.value = signupEmailInput.value.toLowerCase();
+      signupEmailInput.setSelectionRange(cursorPos, cursorPos);
+    });
+  }
+
   // Filters
   document.getElementById('filter-search').addEventListener('input', renderDirectoryList);
   document.getElementById('filter-dept').addEventListener('change', renderDirectoryList);
