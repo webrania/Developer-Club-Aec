@@ -1043,14 +1043,40 @@ function setupEventListeners() {
   // Auth. Forcing it lowercase as-typed keeps the stored value consistent
   // with every comparison already made against it, instead of relying on
   // every future comparison remembering to call .toLowerCase() itself.
-  const signupEmailInput = document.getElementById('signup-email');
-  if (signupEmailInput) {
-    signupEmailInput.addEventListener('input', () => {
-      const cursorPos = signupEmailInput.selectionStart;
-      signupEmailInput.value = signupEmailInput.value.toLowerCase();
-      signupEmailInput.setSelectionRange(cursorPos, cursorPos);
+  //
+  // A plain <input type="email"> does NOT support the selection APIs
+  // (selectionStart / setSelectionRange) per the HTML spec — calling
+  // setSelectionRange on one throws "InvalidStateError: ... does not
+  // support selection", which was showing up in the console on every
+  // keystroke. forceLowercaseAsTyped() below re-lowercases the value and
+  // only attempts to restore the cursor position on input types that
+  // actually support it, swallowing the (harmless) exception otherwise so
+  // it can never surface as an uncaught error.
+  function forceLowercaseAsTyped(input) {
+    if (!input) return;
+    input.addEventListener('input', () => {
+      const original = input.value;
+      const lower = original.toLowerCase();
+      if (lower === original) return; // nothing changed, don't touch the cursor at all
+      const cursorPos = input.selectionStart;
+      input.value = lower;
+      if (typeof cursorPos === 'number') {
+        try {
+          input.setSelectionRange(cursorPos, cursorPos);
+        } catch (e) {
+          // type="email" (and number/date/etc.) don't support this — the
+          // browser will just place the cursor at the end, which is fine.
+        }
+      }
     });
   }
+
+  // Same lowercase-as-you-type behavior on both the registration email
+  // field and the sign-in email field, so what's stored and what's typed
+  // to sign back in always line up without relying on the user to avoid
+  // capital letters themselves.
+  forceLowercaseAsTyped(document.getElementById('signup-email'));
+  forceLowercaseAsTyped(document.getElementById('auth-signin-email'));
 
   // Filters
   document.getElementById('filter-search').addEventListener('input', renderDirectoryList);
@@ -1969,7 +1995,7 @@ function handleSignUpSubmit(e) {
   const roll = document.getElementById('signup-roll').value.trim();
   const dept = document.getElementById('signup-dept').value;
   const year = document.getElementById('signup-year').value;
-  const email = document.getElementById('signup-email').value.trim();
+  const email = document.getElementById('signup-email').value.trim().toLowerCase();
   const phone = document.getElementById('signup-phone').value.trim();
   const whatsapp = document.getElementById('signup-whatsapp').value.trim();
   const password = document.getElementById('signup-password').value;
