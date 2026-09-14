@@ -36,6 +36,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendEmailVerification,
+  sendPasswordResetEmail,
   onAuthStateChanged,
   signOut as firebaseSignOutFn
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
@@ -239,6 +240,31 @@ async function firebaseSignIn(email, password) {
   try {
     const cred = await signInWithEmailAndPassword(firebaseAuth, email, password);
     return { success: true, user: cred.user };
+  } catch (err) {
+    // Also hand back the raw Firebase error code (not just the friendly
+    // message) so the sign-in UI can tell "wrong password" apart from
+    // other failures and only then reveal the Forgot Password link.
+    return { success: false, error: friendlyFirebaseError(err), code: (err && err.code) || '' };
+  }
+}
+
+// Sends Firebase's own "reset your password" email. Firebase hosts the
+// entire rest of the flow itself (the emailed link opens a Firebase page
+// where the user types a new password), so there's no OTP screen or
+// password-change endpoint to build on our side — this one call is the
+// whole feature.
+async function firebaseSendPasswordReset(email) {
+  if (!firebaseAuth) {
+    return {
+      success: false,
+      error: "Password reset isn't available right now — Firebase isn't configured " +
+        "(missing or incomplete .env). See README.md's Setup section, then " +
+        "restart `npm run dev` after saving .env."
+    };
+  }
+  try {
+    await sendPasswordResetEmail(firebaseAuth, email);
+    return { success: true };
   } catch (err) {
     return { success: false, error: friendlyFirebaseError(err) };
   }
@@ -1230,6 +1256,9 @@ function setupEventListeners() {
     showAuthScreen('auth-step-signin');
   });
 
+  const forgotLink = document.getElementById('forgot-password-link');
+  if (forgotLink) forgotLink.addEventListener('click', handleForgotPasswordClick);
+
   const otpInputs = document.querySelectorAll('.otp-input');
   otpInputs.forEach((inp, idx) => {
     inp.addEventListener('input', (e) => {
@@ -1578,6 +1607,11 @@ async function handleSignInEmail(e) {
   // Reset password field
   const passField = document.getElementById('auth-signin-password');
   if (passField) passField.value = '';
+
+  // Fresh attempt at a (possibly different) email — don't carry over the
+  // Forgot Password link from a previous failed attempt.
+  const forgotLink = document.getElementById('forgot-password-link');
+  if (forgotLink) forgotLink.classList.add('d-none');
 
   showAuthScreen('auth-step-otp');
 }
@@ -2210,6 +2244,42 @@ async function handleOtpSubmit(e) {
   }
 }
 
+// "Forgot Password?" link on the sign-in password screen — only shown
+// after a wrong-password attempt (see handleOtpSubmitInner below). Sends
+// Firebase's built-in reset email; Firebase hosts the actual "set a new
+// password" page, so there's nothing further for this app to do once the
+// email is sent.
+async function handleForgotPasswordClick(e) {
+  e.preventDefault();
+  const email = (tempAuthUserObject && tempAuthUserObject.email) ||
+    document.getElementById('auth-signin-email').value.trim().toLowerCase();
+  if (!email) {
+    showToast('Enter your email above first, then try again.');
+    return;
+  }
+
+  const link = document.getElementById('forgot-password-link');
+  const originalText = link ? link.textContent : '';
+  if (link) {
+    link.style.pointerEvents = 'none';
+    link.textContent = 'Sending reset link...';
+  }
+
+  const result = await firebaseSendPasswordReset(email);
+
+  if (link) {
+    link.style.pointerEvents = '';
+    link.textContent = originalText;
+  }
+
+  if (result.success) {
+    showToast(`Password reset link sent to ${email}. Check your inbox.`);
+    alert(`We've sent a password reset link to ${email}.\n\n1. Open your email inbox\n2. Click the reset link\n3. Choose a new password\n4. Come back here and sign in with it`);
+  } else {
+    alert(result.error);
+  }
+}
+
 async function handleOtpSubmitInner(email, password, isNewSignup) {
   // ---- NEW SIGNUP: create the real Firebase account, then save the profile ----
   if (isNewSignup) {
@@ -2251,6 +2321,17 @@ async function handleOtpSubmitInner(email, password, isNewSignup) {
   const result = await firebaseSignIn(email, password);
   if (!result.success) {
     alert(result.error);
+    // Wrong password (or, on newer Firebase projects, the merged
+    // 'invalid-credential' code covering both wrong-password and
+    // no-such-user) is exactly the case someone forgetting their password
+    // hits. Reveal the Forgot Password link now, rather than showing it
+    // up front where it would just be one more thing on the screen before
+    // anyone knows they need it.
+    const forgotCodes = ['auth/wrong-password', 'auth/invalid-credential', 'auth/user-not-found'];
+    if (forgotCodes.includes(result.code)) {
+      const forgotLink = document.getElementById('forgot-password-link');
+      if (forgotLink) forgotLink.classList.remove('d-none');
+    }
     return;
   }
 
