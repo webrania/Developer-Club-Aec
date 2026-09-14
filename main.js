@@ -4242,36 +4242,73 @@ function openEvaluationModal(studentId) {
   openModal('modal-evaluate');
 }
 
-async function deleteStudentRecord() {
-  const studentId = state.activeEvaluationStudentId;
-  if (!studentId) return;
-
+// Shared by both delete entry points (Evaluate modal + the Admin Dashboard
+// name-click profile details). Wipes every piece of this student's data,
+// not just their main record:
+//   - the student's own document (Firestore + local state)
+//   - their volunteer entry, if they were ever approved as one (volunteers
+//     are matched by name, not id, so a plain student-doc delete would
+//     otherwise leave an orphaned entry visible on the Volunteers page)
+//   - any certifications they submitted (certifications are keyed by
+//     studentId in their own Firestore collection, so they don't get
+//     cleaned up automatically by deleting the student doc)
+//   - their chat/support session, if any
+// This is a confirm-then-delete — it does NOT touch their Firebase Auth
+// sign-in account (see the comment inside deleteStudentRecord below for why).
+async function performFullStudentDeletion(studentId) {
   const student = state.students.find(s => s.id === studentId);
-  if (!student) return;
+  if (!student) return false;
 
-  // This only removes the dashboard profile (leaderboard entry, CV status,
-  // scores, etc.) from local storage — it does NOT delete the student's
-  // actual Firebase Auth account. Firebase Auth accounts can only be
-  // deleted by the account owner themselves or via the Firebase Admin SDK
-  // (which requires a backend this project intentionally doesn't have —
-  // see CHANGES.md). If the goal is letting them fully re-register with
-  // the same email, the admin also has to remove that user manually in
-  // Firebase Console -> Authentication -> Users -> (find by email) -> Delete.
   const confirmed = await window.showCustomConfirm(
     'Delete Student Record',
-    `Remove ${student.name}'s dashboard profile (scores, CV, activity)? ` +
-    `This does NOT delete their sign-in account — to let them fully ` +
-    `re-register with the same email, you'll also need to delete their ` +
-    `user in Firebase Console -> Authentication -> Users.`
+    `Permanently remove ${student.name}'s dashboard profile — scores, CV, ` +
+    `certifications, and volunteer status (if any)? This does NOT delete ` +
+    `their sign-in account — to let them fully re-register with the same ` +
+    `email, you'll also need to delete their user in Firebase Console -> ` +
+    `Authentication -> Users. This action cannot be undone.`
   );
-  if (!confirmed) return;
+  if (!confirmed) return false;
 
   const deletedOk = await deleteStudentFromCloud(studentId);
-  if (!deletedOk) return; // error toast already shown; keep it in the list rather than pretending it's gone
+  if (!deletedOk) return false; // error toast already shown; keep it in the list rather than pretending it's gone
+
+  // Clean up the matching volunteer entry, if this student was ever
+  // approved as a volunteer.
+  const matchedVol = state.volunteers.find(v => v && v.name && student.name && v.name.toLowerCase() === student.name.toLowerCase());
+  if (matchedVol) {
+    await deleteVolunteerFromCloud(matchedVol.id);
+    state.volunteers = state.volunteers.filter(v => v.id !== matchedVol.id);
+  }
+
+  // Clean up any certifications this student submitted.
+  const theirCerts = state.certifications.filter(c => c.studentId === studentId);
+  for (const cert of theirCerts) {
+    await deleteCertificationFromCloud(cert.id);
+  }
+  if (theirCerts.length) {
+    state.certifications = state.certifications.filter(c => c.studentId !== studentId);
+    saveCertifications(state.certifications);
+  }
+
+  // Drop their chat/support session.
+  state.chats = (state.chats || []).filter(c => c.studentId !== studentId);
 
   state.students = state.students.filter(s => s.id !== studentId);
   state.followingList = (state.followingList || []).filter(id => id !== studentId);
   saveCurrentState();
+
+  if (typeof showToast === 'function') {
+    showToast(`${student.name}'s data was permanently deleted.`);
+  }
+  return true;
+}
+
+async function deleteStudentRecord() {
+  const studentId = state.activeEvaluationStudentId;
+  if (!studentId) return;
+
+  const deleted = await performFullStudentDeletion(studentId);
+  if (!deleted) return;
 
   closeModal('modal-evaluate');
   state.activeEvaluationStudentId = null;
@@ -4279,11 +4316,23 @@ async function deleteStudentRecord() {
   renderApp();
   if (state.currentTab === 'view-leaderboard') renderLeaderboard();
   if (typeof renderDirectoryList === 'function') renderDirectoryList();
-
-  if (typeof showToast === 'function') {
-    showToast(`${student.name}'s dashboard profile was removed.`);
-  }
 }
+
+// Delete button on the read-only profile details card (Admin Dashboard
+// member directory -> click a name). Only rendered there — see the
+// allowDelete param on window.viewStudentProfileDetails — never on the
+// Leaderboard or Volunteers page.
+window.deleteStudentFromProfileDetails = async function(studentId) {
+  const deleted = await performFullStudentDeletion(studentId);
+  if (!deleted) return;
+
+  closeModal('modal-student-profile-details');
+
+  renderApp();
+  if (state.currentTab === 'view-leaderboard') renderLeaderboard();
+  if (typeof renderDirectoryList === 'function') renderDirectoryList();
+};
+
 
 function handleEvaluationSave(e) {
   e.preventDefault();
@@ -4597,7 +4646,7 @@ function renderDirectoryList() {
     tdInfo.innerHTML = `
       <div class="student-meta">
         <span style="display: inline-flex; align-items: center;">
-          <span class="student-name" style="cursor: pointer; text-decoration: underline;" onclick="window.viewStudentProfileDetails('${s.id}')" title="View Profile Details">${dispName}</span>
+          <span class="student-name" style="cursor: pointer; text-decoration: underline;" onclick="window.viewStudentProfileDetails('${s.id}', true)" title="View Profile Details">${dispName}</span>
         </span>
         <span class="student-roll">${s.roll}</span>
       </div>
@@ -5310,7 +5359,7 @@ window.editVolunteerRole = async function(volId) {
   }
 };
 
-window.viewStudentProfileDetails = function(studentId) {
+window.viewStudentProfileDetails = function(studentId, allowDelete = false) {
   const s = state.students.find(stud => stud.id === studentId);
   if (!s) return;
 
@@ -5319,6 +5368,16 @@ window.viewStudentProfileDetails = function(studentId) {
   const positionText = isVol ? currentVol.role : 'None (Regular Member)';
 
   let adminActions = '';
+  const isAdminViewer = state.viewMode === 'admin' && state.loggedInUser && state.loggedInUser.role === 'admin';
+  if (allowDelete && isAdminViewer) {
+    adminActions = `
+      <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+        <button type="button" class="action-btn danger-btn w-full" onclick="window.deleteStudentFromProfileDetails('${s.id}')">
+          Delete Student Record
+        </button>
+      </div>
+    `;
+  }
 
   const detailBody = document.getElementById('profile-details-body');
   if (detailBody) {
