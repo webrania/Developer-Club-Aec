@@ -4777,7 +4777,9 @@ function renderLeaderboard() {
   const showMasked = state.viewMode !== 'admin' && (!state.loggedInUser || state.loggedInUser.role !== 'admin');
 
   // Hovering a podium name shows a quick detail card (same tooltip pattern
-  // used on Volunteers). Clicking still opens the full edit view for admins.
+  // used on Volunteers). Clicking opens the same read-only profile card for
+  // everyone — the full admin Evaluate/CV/Delete controls live only in the
+  // Admin Dashboard member directory, not on the Leaderboard.
   const wirePodiumDetail = (nameElId, hoverElId, student) => {
     const nameEl = document.getElementById(nameElId);
     const hoverEl = document.getElementById(hoverElId);
@@ -4793,8 +4795,14 @@ function renderLeaderboard() {
     hoverEl.innerHTML = `<strong>${student.name}</strong>\n${student.dept} • ${student.year}\nGitHub: ${student.githubContributions || 0} contributions\nLeetCode: ${(student.leetcodeSolved || 0) * 10} pts (${student.leetcodeSolved || 0} solved)`;
     nameEl.style.cursor = 'pointer';
     nameEl.onclick = () => {
+      // Leaderboard is a view-only surface for everyone, admins included —
+      // it shows the same read-only profile card (window.viewStudentProfileDetails)
+      // that members see. The full Evaluate modal (CV verification, score
+      // editing, Delete Student Record) is intentionally reachable only from
+      // the Admin Dashboard's own member directory (openEvaluationModal, wired
+      // to the "Evaluate" button in renderDirectoryList), never from here.
       if (state.viewMode === 'admin') {
-        openEvaluationModal(student.id);
+        window.viewStudentProfileDetails(student.id);
       } else {
         alert(`${student.name}\n${student.dept} ${student.year}\n\nGitHub contributions: ${student.githubContributions || 0}\nLeetCode points: ${(student.leetcodeSolved || 0) * 10}`);
       }
