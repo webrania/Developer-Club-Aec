@@ -821,6 +821,53 @@ async function syncStudentsAndPollsToCloud() {
   }
 }
 
+// syncStudentsAndPollsToCloud() above only ever *upserts* (setDoc) whatever
+// is currently in the local arrays — it has no way to know an item was
+// removed, so it can never delete anything from Firestore by itself.
+// Deleting a poll or announcement locally and calling saveCurrentState()
+// looked like it worked (it vanished from the admin's own screen), but the
+// Firestore document was never actually removed — so every other user
+// (and the admin, on any other device or after the 30s cache in
+// loadPollsFromCloud/loadNotificationsFromCloud expires) pulled it right
+// back down. These two explicit deletes are the fix, called *before* the
+// local array is filtered, same as deleteCourseFromCloud/
+// deleteCertificationFromCloud/deleteVolunteerFromCloud already do.
+async function deletePollFromCloud(pollId) {
+  if (!firestoreDb) return true; // no cloud configured — local-only delete is all there is
+  try {
+    await deleteDoc(doc(firestoreDb, POLLS_COLLECTION, pollId));
+    return true;
+  } catch (err) {
+    console.error('Could not delete poll from the cloud database.', err);
+    showToast('Unable to delete this poll. Check your connection and try again.');
+    return false;
+  }
+}
+
+async function deleteAnnouncementFromCloud(notifId) {
+  if (!firestoreDb) return true;
+  try {
+    await deleteDoc(doc(firestoreDb, NOTIFICATIONS_COLLECTION, notifId));
+    return true;
+  } catch (err) {
+    console.error('Could not delete announcement from the cloud database.', err);
+    showToast('Unable to delete this announcement. Check your connection and try again.');
+    return false;
+  }
+}
+
+async function deleteStudentFromCloud(studentId) {
+  if (!firestoreDb) return true;
+  try {
+    await deleteDoc(doc(firestoreDb, STUDENTS_COLLECTION, studentId));
+    return true;
+  } catch (err) {
+    console.error('Could not delete student from the cloud database.', err);
+    showToast('Unable to delete this student record. Check your connection and try again.');
+    return false;
+  }
+}
+
 // Points (GitHub Contributions * 1 + LeetCode solved * 10)
 // Active/inactive for both platforms comes only from real fetched
 // timestamps (githubLastActiveDate / leetcodeLastActiveDate). No date is
@@ -2720,6 +2767,8 @@ function resetAnnouncementForm() {
 
 async function deleteAnnouncement(notifId) {
   if (!(await window.showCustomConfirm('Delete Notice', 'Are you sure you want to delete this notice?'))) return;
+  const deletedOk = await deleteAnnouncementFromCloud(notifId);
+  if (!deletedOk) return; // error toast already shown; keep it in the list rather than pretending it's gone
   state.notifications = state.notifications.filter(n => n.id !== notifId);
   saveCurrentState();
   renderAnnouncementsList();
@@ -2881,6 +2930,8 @@ function editPoll(pollId) {
 
 async function deletePoll(pollId) {
   if (!(await window.showCustomConfirm('Delete Poll', 'Delete this poll and all its votes?'))) return;
+  const deletedOk = await deletePollFromCloud(pollId);
+  if (!deletedOk) return; // error toast already shown; keep it in the list rather than pretending it's gone
   state.polls = state.polls.filter(p => p.id !== pollId);
   saveCurrentState();
   renderAnnouncementsList();
@@ -4133,6 +4184,9 @@ async function deleteStudentRecord() {
     `user in Firebase Console -> Authentication -> Users.`
   );
   if (!confirmed) return;
+
+  const deletedOk = await deleteStudentFromCloud(studentId);
+  if (!deletedOk) return; // error toast already shown; keep it in the list rather than pretending it's gone
 
   state.students = state.students.filter(s => s.id !== studentId);
   state.followingList = (state.followingList || []).filter(id => id !== studentId);
