@@ -2257,6 +2257,10 @@ async function handleForgotPasswordClick(e) {
     showToast('Enter your email above first, then try again.');
     return;
   }
+  if (email === 'cse.developerclub@gmail.com') {
+    alert('Self-serve password reset isn\'t available for the club admin account. Contact whoever manages this dashboard to reset it manually.');
+    return;
+  }
 
   const link = document.getElementById('forgot-password-link');
   const originalText = link ? link.textContent : '';
@@ -2327,8 +2331,12 @@ async function handleOtpSubmitInner(email, password, isNewSignup) {
     // hits. Reveal the Forgot Password link now, rather than showing it
     // up front where it would just be one more thing on the screen before
     // anyone knows they need it.
+    // Exception: the club's own admin account (cse.developerclub@gmail.com)
+    // never gets a self-serve reset link — that inbox is shared/managed
+    // outside this app, so admin password recovery is handled manually,
+    // not through this button.
     const forgotCodes = ['auth/wrong-password', 'auth/invalid-credential', 'auth/user-not-found'];
-    if (forgotCodes.includes(result.code)) {
+    if (forgotCodes.includes(result.code) && email !== 'cse.developerclub@gmail.com') {
       const forgotLink = document.getElementById('forgot-password-link');
       if (forgotLink) forgotLink.classList.remove('d-none');
     }
@@ -2607,6 +2615,62 @@ function handleProfileUpdate(e) {
   const rawLeetcode = document.getElementById('profile-leetcode').value.trim();
   const rawLinkedin = document.getElementById('profile-linkedin').value.trim();
 
+  // These mirror getSignupFieldError()'s rules exactly. Signup enforces them
+  // on every keystroke, but until now this Profile Edit form enforced
+  // nothing at all — so a value that would've been rejected at signup could
+  // slip in here instead. Two real-world cases this was causing:
+  //  - LinkedIn: someone edits their profile later and pastes a link copied
+  //    from LinkedIn's mobile "Share profile" button, which comes with
+  //    tracking params (?utm_source=...) or is a sub-page (.../details/
+  //    experience/) rather than the bare profile URL. extractUsername()
+  //    then grabs the wrong trailing segment, and the reconstructed
+  //    linkedin.com/in/<that> link 404s for everyone who clicks it.
+  //  - Phone / WhatsApp: signup forces exactly 10 digits (no country code
+  //    stored). If this form let through a different digit count or a
+  //    number that happened to include "+91", the WhatsApp click-to-chat
+  //    link ends up with a different number of digits than everyone else's,
+  //    so wa.me either opens the wrong chat or fails to resolve it.
+  if (rawPhone) {
+    const phoneDigits = rawPhone.replace(/\D/g, '');
+    if (phoneDigits.length !== 10) {
+      alert('Mobile number must be exactly 10 digits (no country code) — e.g. 9876543210.');
+      return;
+    }
+  }
+  if (rawWhatsapp) {
+    const waDigits = rawWhatsapp.replace(/\D/g, '');
+    if (waDigits.length !== 10) {
+      alert('WhatsApp number must be exactly 10 digits (no country code) — e.g. 9876543210.');
+      return;
+    }
+  }
+  if (rawGithub) {
+    const githubPattern = /^https?:\/\/(www\.)?github\.com\/[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/?$/i;
+    if (!githubPattern.test(rawGithub)) {
+      alert('Must be a real GitHub profile link, e.g. https://github.com/username — not a username or plain text.');
+      return;
+    }
+  }
+  if (rawLeetcode) {
+    const leetcodePattern = /^https?:\/\/(www\.)?leetcode\.com\/(u\/)?[A-Za-z0-9_-]+\/?$/i;
+    if (!leetcodePattern.test(rawLeetcode)) {
+      alert('Must be a real LeetCode profile link, e.g. https://leetcode.com/u/username/ — not a username or plain text.');
+      return;
+    }
+  }
+  if (rawLinkedin) {
+    const linkedinPattern = /^https?:\/\/(www\.)?linkedin\.com\/in\/[A-Za-z0-9_%-]+\/?$/i;
+    if (!linkedinPattern.test(rawLinkedin)) {
+      alert('Must be a real LinkedIn profile link, e.g. https://www.linkedin.com/in/username — not a share link with extra text, a sub-page, or plain text.');
+      return;
+    }
+  }
+
+  // Store phone/whatsapp as clean digits, same as signup does — not
+  // whatever raw formatting (spaces, dashes, a stray +91) the person typed.
+  const phone = rawPhone.replace(/\D/g, '');
+  const whatsapp = rawWhatsapp.replace(/\D/g, '');
+
   const github = extractUsername(rawGithub, 'github.com');
   const leetcode = extractUsername(rawLeetcode, 'leetcode.com');
   const linkedin = extractUsername(rawLinkedin, 'linkedin.com');
@@ -2641,8 +2705,8 @@ function handleProfileUpdate(e) {
             github, 
             leetcode, 
             linkedin, 
-            phone: rawPhone, 
-            whatsapp: rawWhatsapp, 
+            phone, 
+            whatsapp, 
             about,
             githubContributions: githubStats.hasRealMonthly ? githubStats.contributionsThisYear : githubStats.contributions,
             githubVerified: githubStats.verified,
@@ -5324,8 +5388,8 @@ window.approveStudentAsVolunteer = async function(studentId) {
   const role = await window.showCustomPrompt("Approve Volunteer", `Approve ${student.name} as a Volunteer.\nEnter volunteer committee position (e.g. Technical Lead, Joint Secretary, Club Coordinator):`, "Club Coordinator");
   if (!role) return;
 
-  const cleanPhone = student.phone || "+91 94420 12345";
-  const whatsapp = cleanPhone.replace(/[^0-9]/g, '');
+  const cleanPhone = student.phone || ''; // no fake placeholder — leave blank if the student genuinely never set one
+  const whatsapp = student.whatsapp || cleanPhone.replace(/\D/g, ''); // prefer their real WhatsApp number over reusing their phone number
 
   const newVol = {
     id: `vol_${Date.now()}`,
@@ -5545,22 +5609,59 @@ function getDirectContactIconsHtml(studentOrVol) {
   }
 
   // 4. WhatsApp
-  const phoneVal = phone || "+91 94420 12345";
-  const cleanWa = (whatsapp || phoneVal).replace(/[^0-9]/g, '');
-  const waIcon = `
-    <div class="tooltip-wrapper">
-      <a href="https://wa.me/${cleanWa}" target="_blank" style="color: #25d366; display: inline-flex;">${getIconSvg('whatsapp', 15)}</a>
-      <span class="tooltip-text">WhatsApp</span>
-    </div>
-  `;
+  // wa.me needs the FULL international number (country code + digits, no
+  // '+', no spaces) to reliably open the right chat. Signup only ever
+  // stores a bare 10-digit Indian mobile number (no country code, by
+  // design — see getSignupFieldError), so passing that straight to wa.me
+  // is missing the country code it needs. Whether that "happens to work"
+  // anyway depends on the opening device/WhatsApp client's own guess at
+  // the country — which is exactly why it looked like "some users connect,
+  // some don't" for numbers that were entered the same way. Normalizing to
+  // 91XXXXXXXXXX here (India's country code) fixes it for everyone
+  // consistently, regardless of how the number was originally typed.
+  const rawWa = whatsapp || phone; // WhatsApp number if given, else fall back to mobile — never a fake placeholder
+  const waDigits = rawWa.replace(/\D/g, '');
+  let cleanWa = '';
+  if (waDigits.length === 10) {
+    cleanWa = `91${waDigits}`; // bare local number -> add country code
+  } else if (waDigits.length === 11 && waDigits.startsWith('0')) {
+    cleanWa = `91${waDigits.slice(1)}`; // leading trunk '0' -> drop it, add country code
+  } else if (waDigits.length > 10) {
+    cleanWa = waDigits; // already has a country code (or similar) — leave as-is
+  }
 
-  // 5. Call
-  const callIcon = `
+  let waIcon = `
     <div class="tooltip-wrapper">
-      <a href="tel:${phoneVal}" style="color: var(--primary-blue); display: inline-flex;">${getIconSvg('phone', 14)}</a>
-      <span class="tooltip-text">Call</span>
+      <a href="javascript:void(0)" onclick="alert('This Developer Club member has not configured a WhatsApp/mobile number yet.')" style="color: #25d366; opacity: 0.45; display: inline-flex;">${getIconSvg('whatsapp', 15)}</a>
+      <span class="tooltip-text">WhatsApp (Not Configured)</span>
     </div>
   `;
+  if (cleanWa) {
+    waIcon = `
+      <div class="tooltip-wrapper">
+        <a href="https://wa.me/${cleanWa}" target="_blank" style="color: #25d366; display: inline-flex;">${getIconSvg('whatsapp', 15)}</a>
+        <span class="tooltip-text">WhatsApp</span>
+      </div>
+    `;
+  }
+
+  // 5. Call — tel: links work fine with a bare local number (the phone's
+  // own dialer fills in the country context), so no country-code fix is
+  // needed here. Just stop faking a placeholder number when there's none.
+  let callIcon = `
+    <div class="tooltip-wrapper">
+      <a href="javascript:void(0)" onclick="alert('This Developer Club member has not configured a mobile number yet.')" style="color: var(--primary-blue); opacity: 0.45; display: inline-flex;">${getIconSvg('phone', 14)}</a>
+      <span class="tooltip-text">Call (Not Configured)</span>
+    </div>
+  `;
+  if (phone) {
+    callIcon = `
+      <div class="tooltip-wrapper">
+        <a href="tel:${phone}" style="color: var(--primary-blue); display: inline-flex;">${getIconSvg('phone', 14)}</a>
+        <span class="tooltip-text">Call</span>
+      </div>
+    `;
+  }
 
   return `
     <div style="display: flex; gap: 0.45rem; justify-content: center; align-items: center; min-width: 110px;">
